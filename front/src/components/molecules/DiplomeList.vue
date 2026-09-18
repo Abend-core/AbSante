@@ -6,10 +6,10 @@ defineProps<{ items: Diplome[] }>()
 </script>
 
 <template>
-  <div v-if="items.length">
+  <div v-if="items.length" class="diplomes">
     <article v-for="(d, i) in items" :key="`${d.code}-${i}`" class="diplome">
-      <dl>
-        <InfoRow label="Diplôme" :value="d.libelle" />
+      <dl class="fields">
+        <InfoRow label="Diplôme" :value="d.libelle" wide />
         <InfoRow label="Code du diplôme" :value="d.code" />
         <InfoRow label="Type de diplôme" :value="d.type" />
         <InfoRow label="Type d'autorisation" :value="d.typeAutorisation" />
@@ -21,21 +21,32 @@ defineProps<{ items: Diplome[] }>()
 </template>
 
 <style scoped>
-.diplome {
-  margin-bottom: 0.8rem;
-  padding: 0.5rem 1.1rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.diplomes {
+  display: grid;
+  gap: 0.9rem;
 }
 
-dl {
-  margin: 0;
+.diplome {
+  padding: 1.05rem 1.3rem 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(12, 35, 64, 0.04);
+}
+
+.diplome :deep(.info-row--wide .info-row__value) {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 600;
 }
 
 .diplome__empty {
   margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
   font-size: 0.9rem;
   font-style: italic;
-  opacity: 0.75;
+  color: var(--muted);
 }
 </style>

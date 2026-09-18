@@ -19,8 +19,8 @@ const groups = computed(() => {
   <div v-if="items.length" class="savoir-faire">
     <div v-for="group in groups" :key="group.type" class="savoir-faire__group">
       <h3 class="savoir-faire__type">{{ group.type }}</h3>
-      <ul>
-        <li v-for="(item, i) in group.list" :key="`${item.code}-${i}`">
+      <ul class="savoir-faire__chips">
+        <li v-for="(item, i) in group.list" :key="`${item.code}-${i}`" class="savoir-faire__chip">
           <span v-if="item.libelle">{{ item.libelle }}</span>
           <span v-else class="savoir-faire__missing" data-missing>Libellé non renseigné</span>
           <span v-if="item.code" class="savoir-faire__code">{{ item.code }}</span>
@@ -33,40 +33,61 @@ const groups = computed(() => {
 </template>
 
 <style scoped>
+.savoir-faire__group + .savoir-faire__group {
+  margin-top: 1rem;
+}
+
 .savoir-faire__type {
-  margin: 0.6rem 0 0.2rem;
-  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text);
+  letter-spacing: 0.07em;
+  color: var(--muted);
 }
 
-ul {
+.savoir-faire__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
   margin: 0;
-  padding-left: 1.1rem;
-  color: var(--text-h);
-  font-size: 0.9rem;
+  padding: 0;
+  list-style: none;
 }
 
-li {
-  margin: 0.15rem 0;
+.savoir-faire__chip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.45rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-h);
 }
 
 .savoir-faire__code,
 .savoir-faire__profession {
-  margin-left: 0.5rem;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 400;
   color: var(--text);
 }
 
-.savoir-faire__missing,
-.savoir-faire__empty {
+.savoir-faire__missing {
   font-style: italic;
-  opacity: 0.75;
+  color: var(--muted);
 }
 
 .savoir-faire__empty {
   margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
   font-size: 0.9rem;
+  font-style: italic;
+  color: var(--muted);
 }
 </style>
