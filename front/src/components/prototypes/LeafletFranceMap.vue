@@ -454,7 +454,7 @@ onBeforeUnmount(() => {
 .controls {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.9rem 1.5rem;
   margin-bottom: 0.5rem;
   flex-wrap: wrap;
 }
@@ -463,7 +463,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 560px;
   margin-top: 0.5rem;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 @media (max-width: 1024px) {
@@ -475,6 +475,9 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .controls {
     flex-direction: column;
+    /* Sans ça, en colonne, la « ligne » prend la largeur du plus large contrôle (le menu des
+       professions) et déborde du panneau au lieu de se caler sur lui. */
+    flex-wrap: nowrap;
     align-items: stretch;
     gap: 0.75rem;
   }

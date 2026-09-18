@@ -1,15 +1,32 @@
+/* Identité visuelle d'AbSante : bleu nuit + bleu « densité » (la palette de la carte) et
+ * un corail réservé au pouls / aux points d'établissement. Thème clair assumé : le fond de
+ * carte OpenStreetMap est clair, un thème sombre n'aurait fait que juxtaposer deux univers. */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
+  --bg: #f3f6fa;
+  --surface: #ffffff;
+  --surface-soft: #f7f9fc;
+  --text-h: #0c2340;
+  --text: #4a5b70;
+  --muted: #7a889a;
+  --border: #dde5ee;
+  --border-strong: #c3cfdc;
+
+  --brand: #1565c0;
+  --brand-soft: #e6f0fb;
+  --navy: #0a2a4d;
+  --navy-deep: #071c34;
+  --on-navy: #eaf2fb;
+  --on-navy-muted: #9db4cc;
+  --accent: #e5533d;
+
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(12, 35, 64, 0.06), 0 8px 24px rgba(12, 35, 64, 0.08);
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --display: 'Bricolage Grotesque Variable', system-ui, 'Segoe UI', Roboto, sans-serif;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
+  font: 17px/150% var(--sans);
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -22,13 +39,10 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-  }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 html,
@@ -36,35 +50,73 @@ body {
   margin: 0;
   max-width: 100%;
   overflow-x: hidden;
+  background: var(--bg);
 }
 
 h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
+h2,
+h3,
+h4 {
+  font-family: var(--display);
+  font-weight: 600;
   color: var(--text-h);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 h1 {
-  font-size: 32px;
-  letter-spacing: -0.5px;
-  margin: 24px 0;
+  font-size: clamp(2rem, 4.6vw, 3.1rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  margin: 0;
 }
 
 h2 {
-  font-size: 22px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
+  font-size: 1.35rem;
+  line-height: 1.2;
+  margin: 0 0 0.5rem;
 }
 
 p {
   margin: 0;
 }
 
-#app {
-  max-width: 1126px;
+a {
+  color: var(--brand);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* Largeur de lecture commune à l'en-tête, au contenu et au pied de page (16 px de gouttière mini). */
+.container {
+  width: 100%;
+  max-width: 1160px;
   margin: 0 auto;
-  padding: 0 20px 24px;
-  box-sizing: border-box;
+  padding-inline: 20px;
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding-inline: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Grille de champs « libellé au-dessus, valeur dessous » (fiche praticien). */
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.95rem 1.5rem;
+  margin: 0;
 }

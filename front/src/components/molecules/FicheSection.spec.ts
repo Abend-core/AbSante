@@ -14,4 +14,9 @@ describe('FicheSection', () => {
     expect(mount(FicheSection, { props: { title: 'Activités', count: 0 } }).find('.fiche-section__count').text()).toBe('0')
     expect(mount(FicheSection, { props: { title: 'Identité' } }).find('.fiche-section__count').exists()).toBe(false)
   })
+
+  it('peut être sans cadre quand le contenu porte déjà le sien', () => {
+    expect(mount(FicheSection, { props: { title: 'Activités', flat: true } }).classes()).toContain('fiche-section--flat')
+    expect(mount(FicheSection, { props: { title: 'Identité' } }).classes()).not.toContain('fiche-section--flat')
+  })
 })

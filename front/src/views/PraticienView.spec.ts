@@ -50,13 +50,29 @@ describe('PraticienView', () => {
     vi.stubGlobal('fetch', vi.fn(() => respond(200)))
     const wrapper = await mountAt('810006881261')
 
-    expect(wrapper.find('h2').text()).toBe('Madame Solenne BRUN')
+    expect(wrapper.find('h1').text()).toBe('Madame Solenne BRUN')
     expect(wrapper.text()).toContain('Identifiant RPPS 810006881261')
     expect(wrapper.text()).toContain('Technicien de Laboratoire')
     expect(wrapper.text()).toContain('ANTAGENE')
     expect(wrapper.text()).toContain('Diplôme Technicien Laboratoire arrêté 21/10/1992')
     expect(document.title).toBe('Madame Solenne BRUN — AbSante')
     expect(fetch).toHaveBeenCalledWith('/api/praticiens/810006881261')
+  })
+
+  it("n'affiche aucune mention de sources ni de licence sur la fiche (elles sont dans le pied de page du site)", async () => {
+    vi.stubGlobal('fetch', vi.fn(() => respond(200)))
+    const text = (await mountAt('810006881261')).text()
+    expect(text).not.toMatch(/Source|Annuaire Santé|Licence|Agence du Numérique/i)
+    expect(text).toContain('Fiche mise à jour le 18 septembre 2026')
+  })
+
+  it("présente le profil en en-tête : initiales, profession et commune d'exercice", async () => {
+    vi.stubGlobal('fetch', vi.fn(() => respond(200)))
+    const wrapper = await mountAt('810006881261')
+    const header = wrapper.find('.fiche-header')
+    expect(header.find('.fiche-header__avatar').text()).toBe('SB')
+    expect(header.find('.fiche-header__professions').text()).toBe('Technicien de Laboratoire')
+    expect(header.find('.fiche-header__places').text()).toContain('La Tour-de-Salvagny (69890)')
   })
 
   it('signale clairement chaque information manquante (spécialités, téléphone, e-mail...)', async () => {
@@ -92,7 +108,7 @@ describe('PraticienView', () => {
     down = false
     await wrapper.find('.praticien-view__retry').trigger('click')
     await flushPromises()
-    expect(wrapper.find('h2').text()).toBe('Madame Solenne BRUN')
+    expect(wrapper.find('h1').text()).toBe('Madame Solenne BRUN')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
@@ -106,7 +122,7 @@ describe('PraticienView', () => {
   it('affiche une fiche minimale (aucune activité, spécialité ni diplôme) sans erreur', async () => {
     vi.stubGlobal('fetch', vi.fn(() => respond(200, { ...FICHE, activites: [], diplomes: [], civilite: null, prenom: null, misAJourLe: null })))
     const wrapper = await mountAt('810006881261')
-    expect(wrapper.find('h2').text()).toBe('BRUN')
+    expect(wrapper.find('h1').text()).toBe('BRUN')
     expect(wrapper.text()).toContain("aucune activité n'est enregistrée")
     expect(wrapper.text()).toContain("aucun diplôme ni autorisation n'est enregistré")
   })

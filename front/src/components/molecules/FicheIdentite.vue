@@ -7,19 +7,22 @@ defineProps<{ fiche: Fiche }>()
 </script>
 
 <template>
-  <dl class="fiche-identite">
+  <dl class="fields fiche-identite">
     <InfoRow label="Civilité" :value="fiche.civilite" />
     <InfoRow label="Civilité d'exercice" :value="fiche.civiliteExercice" />
     <InfoRow label="Nom d'exercice" :value="fiche.nom" />
     <InfoRow label="Prénom d'exercice" :value="fiche.prenom ? titleCase(fiche.prenom) : null" />
-    <InfoRow label="Identifiant national (RPPS)" :value="fiche.id" />
+    <InfoRow label="Identifiant national (RPPS)" :value="fiche.id" wide />
     <InfoRow label="Identifiant PP" :value="fiche.identifiantPP" />
     <InfoRow label="Type d'identifiant" :value="fiche.typeIdentifiant" />
   </dl>
 </template>
 
 <style scoped>
+/* Colonne latérale étroite : une seule colonne, sinon les libellés longs passent sur deux
+   lignes et décalent les valeurs les unes par rapport aux autres. */
 .fiche-identite {
-  margin: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.8rem;
 }
 </style>
