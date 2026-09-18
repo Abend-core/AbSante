@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { Activite, Structure } from '../../types/fiche'
 import ActiviteCard from './ActiviteCard.vue'
@@ -67,4 +67,39 @@ describe('ActiviteCard', () => {
     const wrapper = mount(ActiviteCard, { props: { activite: { ...antagene, profession: null }, index: 1, total: 1 } })
     expect(wrapper.find('h3').text()).toContain('Profession non renseignée')
   })
+
+  it('permet de copier adresse complète, téléphone mis en forme, e-mail et numéros d\'identification', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const activite = {
+      ...antagene,
+      structure: { ...antagene.structure!, telephone: '0467336733', email: 'cabinet@example.org', finessSite: '340785161' },
+    }
+    const wrapper = mount(ActiviteCard, { props: { activite, index: 1, total: 1 } })
+
+    const copies: Record<string, string> = {}
+    for (const row of wrapper.findAll('.info-row')) {
+      const button = row.find('.copy-button__button')
+      if (!button.exists()) continue
+      await button.trigger('click')
+      copies[row.find('dt').text()] = writeText.mock.calls.at(-1)![0]
+    }
+    Reflect.deleteProperty(navigator, 'clipboard')
+
+    expect(copies['Adresse']).toBe('6 ALL DU LEVANT, 69890 La Tour-de-Salvagny')
+    expect(copies['Téléphone']).toBe('04 67 33 67 33')
+    expect(copies['E-mail']).toBe('cabinet@example.org')
+    expect(copies['SIRET']).toBe('44154525800036') // chiffres bruts, sans espaces : prêt à coller dans un formulaire
+    expect(copies['FINESS (site)']).toBe('340785161')
+    expect(copies['Raison sociale']).toBe('ANTAGENE')
+  })
+
+  it("n'affiche pas de bouton de copie pour les informations absentes", () => {
+    const wrapper = mount(ActiviteCard, { props: { activite: antagene, index: 1, total: 1 } })
+    const rows = wrapper.findAll('.info-row')
+    const phone = rows.find((r) => r.find('dt').text() === 'Téléphone')!
+    expect(phone.find('.copy-button').exists()).toBe(false)
+    expect(phone.find('[data-missing]').exists()).toBe(true)
+  })
 })
+

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
+import ActionButton from '../components/atoms/ActionButton.vue'
 import ActiviteCard from '../components/molecules/ActiviteCard.vue'
 import DiplomeList from '../components/molecules/DiplomeList.vue'
 import FicheHeader from '../components/molecules/FicheHeader.vue'
@@ -30,13 +31,12 @@ watchEffect(() => {
     <div v-else-if="state.status === 'not-found'" class="container praticien-view__state" role="alert">
       <h1>Praticien introuvable</h1>
       <p>Aucun praticien ne correspond à l'identifiant « {{ route.params.id }} » dans le RPPS.</p>
-      <RouterLink to="/" class="praticien-view__action">Retour à la carte</RouterLink>
     </div>
 
     <div v-else-if="state.status === 'unavailable' || state.status === 'error'" class="container praticien-view__state" role="alert">
       <h1>{{ state.status === 'unavailable' ? 'Service momentanément indisponible' : 'La fiche n\'a pas pu être chargée' }}</h1>
       <p>Le détail des praticiens ne répond pas pour le moment. Vos informations ne sont pas perdues : réessayez dans un instant.</p>
-      <button type="button" class="praticien-view__action praticien-view__retry" @click="reload">Réessayer</button>
+      <ActionButton variant="outline" class="praticien-view__retry" @click="reload">Réessayer</ActionButton>
     </div>
 
     <template v-else-if="fiche">
@@ -77,24 +77,8 @@ watchEffect(() => {
   font-size: 1.8rem;
 }
 
-.praticien-view__action {
-  display: inline-block;
+.praticien-view__retry {
   margin-top: 1rem;
-  padding: 0.5rem 1.2rem;
-  border: 1px solid var(--brand);
-  border-radius: 999px;
-  background: transparent;
-  font: inherit;
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: var(--brand);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.praticien-view__action:hover {
-  background: var(--brand);
-  color: #fff;
 }
 
 .praticien-view__body {
