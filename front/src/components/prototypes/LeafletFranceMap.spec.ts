@@ -18,6 +18,8 @@ function makeLayer() {
     setLatLng: vi.fn(),
     getLatLng: vi.fn(() => ({ lat: 45.0, lng: 2.0 })),
     addTo: vi.fn(),
+    bindTooltip: vi.fn(),
+    bringToFront: vi.fn(),
     __handlers: handlers,
   }
 }
@@ -61,10 +63,12 @@ vi.mock('leaflet', () => {
   const map = {
     on: mapOnSpy,
     getZoom: vi.fn(() => 6),
+    getCenter: vi.fn(() => ({ lat: 46.6, lng: 2.4 })),
     setView: setViewSpy,
     fitBounds: fitBoundsSpy,
     remove: removeSpy,
     removeLayer: vi.fn(),
+    hasLayer: vi.fn(() => true),
     zoomControl: { setPosition: vi.fn() },
   }
 
@@ -214,6 +218,48 @@ describe('LeafletFranceMap', () => {
     clickHandler!()
 
     expect(fitBoundsSpy).toHaveBeenCalled()
+  })
+
+  it('un second clic sur le département déjà zoomé ne fait rien (évite de dézoomer accidentellement en cliquant à côté d\'un point)', async () => {
+    mount(LeafletFranceMap)
+    await flushPromises()
+
+    const layer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], layer)
+    layer.__handlers.click?.()
+    expect(fitBoundsSpy).toHaveBeenCalledTimes(1)
+
+    layer.__handlers.click?.()
+    expect(fitBoundsSpy).toHaveBeenCalledTimes(1) // pas de second appel
+  })
+
+  it("cliquer l'anneau bleu revient à l'étape précédente, une par une (ville -> département -> France)", async () => {
+    const wrapper = mount(LeafletFranceMap)
+    await flushPromises()
+
+    const { default: L } = await import('leaflet')
+    const cityHighlightMock = (L.circleMarker as ReturnType<typeof vi.fn>).mock.results[0]
+      .value as ReturnType<typeof makeLayer>
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await flushPromises()
+
+    const communeMarker = pointsAdded[0] as ReturnType<typeof makeLayer>
+    communeMarker.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Testville')
+
+    cityHighlightMock.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Ain')
+    expect(wrapper.text()).not.toContain('Testville')
+
+    cityHighlightMock.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).not.toContain('Ain')
+    expect(wrapper.text()).not.toContain('Testville')
   })
 
   it('les établissements sont désactivés par défaut', async () => {
