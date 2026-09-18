@@ -1,0 +1,36 @@
+# Dossiers internes (non versionnés)
+agent/
+projet/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+front/coverage/
+npm-debug.log*
+*.local
+
+# Python (scripts/)
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Sources RPPS brutes : téléchargées par scripts/update_rpps.py (~820 Mo), jamais
+# commitées — seuls les fichiers déjà traités dans front/public/data/ le sont.
+PS_LibreAcces_Personne_activite.txt
+communes_coords.csv
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+.vscode/
+.idea/

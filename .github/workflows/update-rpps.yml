@@ -1,0 +1,61 @@
+name: Update RPPS data
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # tous les jours à 5h UTC
+  workflow_dispatch:
+
+jobs:
+  update:
+    name: Retélécharge et retraite le RPPS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install pandas requests
+
+      - name: Update RPPS data
+        run: python scripts/update_rpps.py
+
+      - name: Géocode les nouveaux établissements (incrémental, voir le cache existant)
+        run: python scripts/geocode_etablissements.py --offline
+
+      - name: Update RPPS data (réintègre les coordonnées fraîchement géocodées)
+        run: python scripts/update_rpps.py --offline
+
+      # main est protégée (fusion uniquement, pas de push direct, voir les règles de
+      # branche) -> on passe par une branche dédiée + PR avec fusion automatique dès
+      # que la CI (lint/test/build) passe, plutôt qu'un push direct qui échouerait.
+      - name: Commit if changed
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add front/public/data/rpps-departement.json front/public/data/rpps-commune.json front/public/data/etablissements/ front/public/data/etablissements-geo.json
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git checkout -b automated/rpps-data-update
+            git commit -m "chore: mise à jour quotidienne des données RPPS"
+            git push --force origin automated/rpps-data-update
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ouvre la PR et active la fusion automatique
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --base main --head automated/rpps-data-update \
+            --title "chore: mise à jour quotidienne des données RPPS" \
+            --body "Régénéré automatiquement par .github/workflows/update-rpps.yml." \
+            || echo "PR déjà ouverte, réutilisation"
+          gh pr merge automated/rpps-data-update --squash --auto
