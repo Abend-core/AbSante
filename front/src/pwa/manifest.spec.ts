@@ -49,3 +49,39 @@ describe('index.html', () => {
     expect(html).toContain('name="author" content="Équipe Abend"')
   })
 })
+
+describe("aperçu de lien (Open Graph), comme rxdy.fr", () => {
+  const meta = (attr: 'property' | 'name', key: string) => html.match(new RegExp(`<meta\\s+${attr}="${key}"\\s+content="([^"]*)"`, 's'))?.[1]
+
+  it("déclare titre, description, adresse, site et langue", () => {
+    expect(meta('property', 'og:type')).toBe('website')
+    expect(meta('property', 'og:site_name')).toBe('AbSante')
+    expect(meta('property', 'og:title')).toContain('AbSante')
+    expect(meta('property', 'og:description')?.length).toBeGreaterThan(40)
+    expect(meta('property', 'og:url')).toBe('https://absante.rxdy.fr/')
+    expect(meta('property', 'og:locale')).toBe('fr_FR')
+    expect(html).toContain('rel="canonical" href="https://absante.rxdy.fr/"')
+  })
+
+  it("pointe vers une image absolue en HTTPS, décrite et de dimensions annoncées", () => {
+    expect(meta('property', 'og:image')).toBe('https://absante.rxdy.fr/og-image.png')
+    expect(meta('property', 'og:image:width')).toBe('1200')
+    expect(meta('property', 'og:image:height')).toBe('630')
+    expect(meta('property', 'og:image:alt')).toBeTruthy()
+  })
+
+  it('demande la grande carte sur X / Twitter avec la même image', () => {
+    expect(meta('name', 'twitter:card')).toBe('summary_large_image')
+    expect(meta('name', 'twitter:title')).toBe(meta('property', 'og:title'))
+    expect(meta('name', 'twitter:image')).toBe(meta('property', 'og:image'))
+  })
+
+  it("l'image existe réellement et fait bien 1200 × 630 px (lu dans l'en-tête PNG)", () => {
+    const png = readFileSync(resolve(root, 'public/og-image.png'))
+    expect(png.subarray(1, 4).toString()).toBe('PNG')
+    expect(png.readUInt32BE(16)).toBe(1200)
+    expect(png.readUInt32BE(20)).toBe(630)
+    expect(png.length).toBeLessThan(600 * 1024) // WhatsApp ignore les images trop lourdes
+  })
+})
+
