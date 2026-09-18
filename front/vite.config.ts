@@ -12,6 +12,11 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
+    // L'API (dossier api/) tourne à part ; en dev le front la joint via ce proxy pour
+    // rester sur une seule origine (pas de CORS à configurer).
+    proxy: {
+      '/api': { target: process.env.API_PROXY_TARGET ?? 'http://localhost:3100', changeOrigin: true },
+    },
   },
   test: {
     environment: 'jsdom',

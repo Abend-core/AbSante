@@ -1,4 +1,35 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: absante
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-absante}
+      POSTGRES_DB: absante
+    ports:
+      # Local uniquement (jamais exposée sur le réseau). 54329 : évite un Postgres déjà installé.
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U absante -d absante"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: postgres://absante:${POSTGRES_PASSWORD:-absante}@postgres:5432/absante
+      PORT: "3100"
+    ports:
+      - "3100:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   front:
     build:
       context: ./front
@@ -10,3 +41,9 @@ services:
       - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
+      - API_PROXY_TARGET=http://api:3100
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

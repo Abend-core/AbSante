@@ -5,7 +5,8 @@ Met à jour les données RPPS servies par le front :
   coordonnées, pour les points sur la carte
 - front/public/data/etablissements/{dept}.json : un fichier par département, chargé à la
   demande (voir useEtablissements.ts) quand on zoome dessus -> pour chaque commune, la
-  liste COMPLETE de ses établissements avec le nom/prénom/profession de chaque praticien.
+  liste COMPLETE de ses établissements avec le nom/prénom/profession de chaque praticien
+  et son identifiant national (clé de la fiche détaillée servie par api/).
   Volumineux (~1,5M lignes praticien x établissement au global) -> découpé par département
   pour ne jamais tout charger d'un coup côté front.
 
@@ -34,6 +35,7 @@ OUT_GEO_CACHE = "front/public/data/etablissements-geo.json"
 
 USECOLS = [
     "Identifiant PP",
+    "Identification nationale PP",
     "Nom d'exercice",
     "Prénom d'exercice",
     "Code postal (coord. structure)",
@@ -185,7 +187,13 @@ def main():
             etabs_out = []
             for structure_id, etab_group in commune_group.groupby("Identifiant technique de la structure"):
                 praticiens = [
-                    [r["Nom d'exercice"], r["Prénom d'exercice"], r["Libellé profession"]]
+                    [
+                        r["Nom d'exercice"],
+                        r["Prénom d'exercice"],
+                        r["Libellé profession"],
+                        # Clé de la fiche détaillée (API) : identifiant national, type inclus
+                        r["Identification nationale PP"],
+                    ]
                     for _, r in etab_group.iterrows()
                 ]
                 raison_sociale = etab_group["Raison sociale site"].iloc[0]

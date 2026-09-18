@@ -17,8 +17,10 @@ defineEmits<{ 'select-etablissement': [etablissement: Etablissement] }>()
         <span>{{ detail.n }} {{ unit }}</span>
       </div>
       <ul v-if="detail.praticiens?.length" class="detail-card__praticiens">
-        <li v-for="p in detail.praticiens" :key="`${p.nom}-${p.prenom}-${p.profession}`">
+        <li v-for="p in detail.praticiens" :key="`${p.id}-${p.profession}`">
           {{ p.prenom }} {{ p.nom }} <span class="detail-card__profession">— {{ p.profession }}</span>
+          <!-- Nouvel onglet : la carte garde sa position et son zoom. -->
+          <a class="detail-card__fiche" :href="`/praticien/${p.id}`" target="_blank" rel="noopener">Voir la fiche</a>
         </li>
       </ul>
       <ul v-else-if="detail.etablissements?.length" class="detail-card__etablissements">
@@ -69,6 +71,24 @@ defineEmits<{ 'select-etablissement': [etablissement: Etablissement] }>()
 
 .detail-card__profession {
   color: #888;
+}
+
+.detail-card__fiche {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.5rem;
+  border: 1px solid #1e88e5;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #1e88e5;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.detail-card__fiche:hover,
+.detail-card__fiche:focus-visible {
+  background: #1e88e5;
+  color: #fff;
 }
 
 .detail-card__etablissements {

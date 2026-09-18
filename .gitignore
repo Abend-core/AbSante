@@ -19,7 +19,7 @@ venv/
 
 # Sources RPPS brutes : téléchargées par scripts/update_rpps.py (~820 Mo), jamais
 # commitées — seuls les fichiers déjà traités dans front/public/data/ le sont.
-PS_LibreAcces_Personne_activite.txt
+PS_LibreAcces_*.txt
 communes_coords.csv
 
 # Env / secrets
