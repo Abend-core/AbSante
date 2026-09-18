@@ -29,4 +29,9 @@ describe('InfoRow', () => {
     expect(wrapper.find('a').exists()).toBe(false)
     expect(wrapper.find('[data-missing]').exists()).toBe(true)
   })
+
+  it('peut occuper toute la largeur de la grille (adresse, libellés longs)', () => {
+    expect(mount(InfoRow, { props: { label: 'Adresse', value: 'x', wide: true } }).classes()).toContain('info-row--wide')
+    expect(mount(InfoRow, { props: { label: 'Adresse', value: 'x' } }).classes()).not.toContain('info-row--wide')
+  })
 })

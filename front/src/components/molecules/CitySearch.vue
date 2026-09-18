@@ -83,12 +83,20 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .city-search input {
-  padding: 0.35rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  min-width: 200px;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+  min-width: min(220px, 100%);
   max-width: 100%;
   font-size: 0.9rem;
+}
+
+.city-search input:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  border-color: var(--brand);
 }
 
 .city-search__suggestions {

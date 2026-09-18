@@ -39,9 +39,9 @@ defineEmits<{ 'select-etablissement': [etablissement: Etablissement] }>()
 .detail-card {
   margin-top: 0.75rem;
   padding: 0.6rem 1rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
   min-height: 1.4rem;
   max-height: 260px;
   overflow-y: auto;
