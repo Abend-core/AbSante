@@ -34,4 +34,24 @@ describe('InfoRow', () => {
     expect(mount(InfoRow, { props: { label: 'Adresse', value: 'x', wide: true } }).classes()).toContain('info-row--wide')
     expect(mount(InfoRow, { props: { label: 'Adresse', value: 'x' } }).classes()).not.toContain('info-row--wide')
   })
+
+  describe('copie', () => {
+    it('ne propose aucun bouton de copie par défaut', () => {
+      expect(mount(InfoRow, { props: { label: 'Rôle', value: 'x' } }).find('button').exists()).toBe(false)
+    })
+
+    it("propose un bouton dont le nom reprend le libellé, ou un nom explicite", () => {
+      expect(mount(InfoRow, { props: { label: 'SIRET', value: '1', copy: '1' } }).find('button').attributes('aria-label')).toBe('Copier siret')
+      expect(
+        mount(InfoRow, { props: { label: 'Adresse', value: 'x', copy: 'x, 69890', copyLabel: "l'adresse complète" } }).find('button').attributes('aria-label'),
+      ).toBe("Copier l'adresse complète")
+    })
+
+    it('ne propose rien à copier quand la valeur est absente (seulement « Non renseigné »)', () => {
+      const wrapper = mount(InfoRow, { props: { label: 'Téléphone', value: null, copy: '0467336733' } })
+      expect(wrapper.find('button').exists()).toBe(false)
+      expect(wrapper.find('[data-missing]').text()).toBe('Non renseigné')
+    })
+  })
 })
+

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import InfoRow from '../atoms/InfoRow.vue'
 import type { Diplome } from '../../types/fiche'
+import InfoRow from './InfoRow.vue'
 
 defineProps<{ items: Diplome[] }>()
 </script>

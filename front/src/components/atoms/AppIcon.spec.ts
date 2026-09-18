@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import AppIcon from './AppIcon.vue'
 import type { IconName } from './AppIcon.vue'
 
-const NAMES: IconName[] = ['search', 'layers', 'pin', 'arrow-left', 'github', 'phone', 'mail', 'external']
+const NAMES: IconName[] = ['search', 'layers', 'pin', 'arrow-left', 'github', 'phone', 'mail', 'external', 'copy', 'check', 'download', 'close', 'share']
 
 describe('AppIcon', () => {
   it.each(NAMES)("dessine l'icône %s (un tracé non vide)", (name) => {

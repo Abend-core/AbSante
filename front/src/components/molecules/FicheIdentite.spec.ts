@@ -30,4 +30,13 @@ describe('FicheIdentite', () => {
     })
     expect(wrapper.findAll('[data-missing]')).toHaveLength(6) // tout sauf l'identifiant national
   })
+
+  it("propose de copier l'identifiant RPPS et l'identifiant PP, pas les autres champs", () => {
+    const wrapper = mount(FicheIdentite, { props: { fiche: { ...base, identifiantPP: '10110323986' } } })
+    expect(wrapper.findAll('.copy-button__button').map((b) => b.attributes('aria-label'))).toEqual([
+      "Copier l'identifiant RPPS",
+      'Copier identifiant pp',
+    ])
+  })
 })
+

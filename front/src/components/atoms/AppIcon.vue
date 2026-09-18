@@ -1,5 +1,18 @@
 <script setup lang="ts">
-export type IconName = 'search' | 'layers' | 'pin' | 'arrow-left' | 'github' | 'phone' | 'mail' | 'external'
+export type IconName =
+  | 'search'
+  | 'layers'
+  | 'pin'
+  | 'arrow-left'
+  | 'github'
+  | 'phone'
+  | 'mail'
+  | 'external'
+  | 'copy'
+  | 'check'
+  | 'download'
+  | 'close'
+  | 'share'
 
 defineProps<{ name: IconName; size?: number }>()
 
@@ -16,6 +29,11 @@ const PATHS: Record<IconName, string> = {
     'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z',
   mail: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM21 6l-9 7-9-7',
   external: 'M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
+  copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  download: 'M12 3v12M7 10l5 5 5-5M4 20h16',
+  close: 'M6 6l12 12M18 6L6 18',
+  share: 'M12 15V3M8 7l4-4 4 4M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1',
 }
 </script>
 

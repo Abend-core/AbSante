@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PillBadge from '../atoms/PillBadge.vue'
+
 defineProps<{
   title: string
   /** Nombre d'éléments listés (affiché à côté du titre quand fourni). */
@@ -12,7 +14,7 @@ defineProps<{
   <section class="fiche-section" :class="{ 'fiche-section--flat': flat }">
     <h2 class="fiche-section__title">
       {{ title }}
-      <span v-if="count !== undefined" class="fiche-section__count">{{ count }}</span>
+      <PillBadge v-if="count !== undefined" variant="count" class="fiche-section__count">{{ count }}</PillBadge>
     </h2>
     <slot />
   </section>
@@ -35,17 +37,4 @@ defineProps<{
   font-size: 1.15rem;
 }
 
-.fiche-section__count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
-  padding-inline: 0.4rem;
-  border-radius: 999px;
-  background: var(--brand-soft);
-  font-family: var(--sans);
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--brand);
-}
 </style>

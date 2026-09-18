@@ -1,5 +1,7 @@
 # AbSante
 
+> Un projet de l'équipe **Abend** ([organisation GitHub Abend-core](https://github.com/Abend-core)).
+
 Carte interactive de la densité et de la répartition des professionnels de santé en
 France, à partir du [RPPS](https://esante.gouv.fr/produits-services/repertoire-rpps)
 (Répertoire Partagé des Professionnels de Santé, data.gouv.fr).
@@ -51,6 +53,23 @@ Depuis la carte, chaque praticien listé a un bouton « Voir la fiche » qui ouv
 `/praticien/<identifiant national>` dans un nouvel onglet : identité, spécialités et
 compétences, activités avec leur lieu d'exercice (adresse, téléphone, e-mail, SIRET, FINESS...),
 diplômes et autorisations. Toute information absente du RPPS est indiquée « Non renseigné ».
+
+## Application installable (PWA)
+
+Le bouton **Installer l'application** du header installe AbSante en un clic, comme une
+application (icône, fenêtre à part) :
+
+- **Chrome, Edge, Android** : un clic ouvre l'installation native du navigateur.
+- **iPhone / iPad (Safari)** : le bouton affiche le chemin « Partager → Sur l'écran d'accueil »
+  (Apple n'autorise pas l'installation par un bouton).
+- **Déjà installée, ou navigateur sans installation** (ex : Firefox sur ordinateur) : le bouton
+  n'apparaît pas.
+
+Le service worker (`front/public/sw.js`) est volontairement minimal : il rend l'application
+installable et affiche une page claire hors connexion. Il ne met jamais en cache l'API, les données
+ni les scripts, donc les fiches restent fraîches et une nouvelle version n'est jamais masquée. Les
+icônes sont dans `front/public/icons/` (source : `icon-any.svg` et `icon-maskable.svg`).
+L'installation exige HTTPS en production (`localhost` fonctionne en développement).
 
 ## Base de données (API)
 

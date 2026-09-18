@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a2a4d" />
+    <title>Hors ligne — AbSante</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box;
+             background: #0a2a4d; color: #eaf2fb; font: 17px/1.5 system-ui, 'Segoe UI', Roboto, sans-serif; text-align: center; }
+      main { max-width: 30rem; }
+      h1 { margin: 1rem 0 0.5rem; font-size: 1.7rem; color: #fff; }
+      p { margin: 0 0 1.4rem; color: #9db4cc; }
+      button { padding: 0.6rem 1.4rem; border: 0; border-radius: 999px; background: #1e88e5; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+      button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg width="64" height="64" viewBox="0 0 34 34" aria-hidden="true">
+        <rect width="34" height="34" rx="10" fill="#1e88e5" />
+        <path d="M5 18h6l3-8 5 15 3-7h4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+        <circle cx="29" cy="18" r="2.6" fill="#e5533d" stroke="#fff" stroke-width="1.4" />
+      </svg>
+      <h1>Vous êtes hors ligne</h1>
+      <p>AbSante a besoin d'une connexion pour charger la carte et les fiches des praticiens. Reconnectez-vous puis réessayez.</p>
+      <button type="button" onclick="location.reload()">Réessayer</button>
+    </main>
+  </body>
+</html>
