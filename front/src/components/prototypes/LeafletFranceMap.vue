@@ -177,10 +177,10 @@ function initMap() {
   // l'ordre d'empilement ne dépend plus de qui a été ajouté ou survolé en dernier.
   // Sans ça, le bringToFront() du département survolé (voir plus bas) le remontait
   // par-dessus les points, qui devenaient impossibles à cliquer (le clic tombait sur
-  // le département). Et l'anneau, posé sur le même point qu'un établissement, reste
-  // au-dessus de celui-ci pour rester cliquable.
+  // le département). L'anneau reste SOUS les points : posé sur la ville ou sur un
+  // établissement, il ne doit jamais empêcher de cliquer un établissement voisin.
+  map.createPane(REPERE_PANE).style.zIndex = '440'
   map.createPane(ETABLISSEMENTS_PANE).style.zIndex = '450'
-  map.createPane(REPERE_PANE).style.zIndex = '460'
   // Fond de plan OpenStreetMap standard : pas de clé requise, contrairement
   // aux styles CARTO hébergés (basemaps.cartocdn.com exige désormais une clé
   // API sur leur offre gratuite, vérifié par capture d'écran -> tuiles
@@ -242,17 +242,16 @@ function initMap() {
     },
   ).addTo(map)
 
-  // fill quasi-invisible (0.01, pas 0) -> tout le disque est cliquable, pas
-  // seulement le trait du contour (cible bien trop fine pour cliquer dessus).
-  // Vérifié : à fillOpacity exactement 0, le SVG ne compte plus la forme comme
-  // "painted" et les clics passent au travers (aucun gestionnaire déclenché) —
-  // 0.01 reste visuellement invisible mais reçoit bien les clics.
+  // Seul le trait de l'anneau est cliquable (pas de remplissage) : un disque
+  // cliquable recouvrait les établissements situés dans l'anneau — dont celui
+  // qu'il entoure — et les rendait inutilisables (clic = retour en arrière).
+  // Trait épais (6 px) pour garder une cible confortable, et calque sous les points.
   cityHighlight = L.circleMarker(FRANCE_CENTER, {
     radius: 16,
     color: '#1e88e5',
-    weight: 3,
-    fill: true,
-    fillOpacity: 0.01,
+    weight: 6,
+    opacity: 0.85,
+    fill: false,
     interactive: true,
     pane: REPERE_PANE,
   })
@@ -279,9 +278,10 @@ function makeMarker(lat: number, lon: number): L.CircleMarker {
  *  Zoome sur sa vraie position géocodée si connue (précision "rue"), sinon sur
  *  la commune (on ne sait rien de plus précis). */
 function showEtablissement(etab: Etablissement, communeNom: string, communeLat: number, communeLon: number) {
-  pushView()
+  const nom = `${etab.nom} (${communeNom})`
+  if (selectedPoint.value?.nom !== nom) pushView()
   selectedDept.value = null
-  selectedPoint.value = { nom: `${etab.nom} (${communeNom})`, n: etab.praticiens.length, praticiens: etab.praticiens }
+  selectedPoint.value = { nom, n: etab.praticiens.length, praticiens: etab.praticiens }
   if (etab.coords) focusCity(etab.coords[0], etab.coords[1], ETABLISSEMENT_ZOOM)
   else focusCity(communeLat, communeLon, cityZoomFor(0))
 }
@@ -331,7 +331,9 @@ function refreshData() {
       // et enchaîne sur un zoom "ville" adapté à sa taille -> après le zoom
       // département, on peut zoomer davantage sur une commune précise.
       marker.on('click', () => {
-        pushView()
+        // Recliquer sur la commune déjà affichée n'ajoute pas d'étape : sinon
+        // l'anneau "retour" ramènerait sur la même fiche.
+        if (selectedPoint.value?.nom !== p.nom) pushView()
         selectedDept.value = null
         selectedPoint.value = { nom: p.nom, n: p.n, etablissements: ungeocoded.length > 0 ? ungeocoded : undefined }
         focusCity(p.lat, p.lon, cityZoomFor(p.total))
