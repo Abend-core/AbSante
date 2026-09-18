@@ -206,7 +206,16 @@ function initMap() {
         // Survol : juste un repère visuel (bordure), léger et sans effet de
         // bord -> ne touche plus au détail affiché (auparavant mis à jour à
         // chaque mouvement de souris, gênant quand on veut lire l'info).
-        layer.on('mouseover', () => (layer as L.Path).setStyle({ weight: 2, color: '#333' }))
+        layer.on('mouseover', () => {
+          const path = layer as L.Path
+          path.setStyle({ weight: 2, color: '#333' })
+          // Chaque département est un contour séparé dans le GeoJSON : sans ça, la
+          // fine bordure blanche (non survolée) du département voisin, dessinée par-
+          // dessus le long de la frontière commune, "mange" une partie de la bordure
+          // foncée du survol -> épaisseur visiblement inégale selon le côté du
+          // contour (constaté : net à l'ouest, presque invisible à l'est vers Lyon).
+          path.bringToFront()
+        })
         layer.on('mouseout', () => polygonsLayer?.resetStyle(layer as L.Path))
         layer.on('click', () => {
           // Le polygone département couvre TOUTE sa surface, y compris une fois zoomé
