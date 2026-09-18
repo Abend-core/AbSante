@@ -10,12 +10,17 @@ const emit = defineEmits<{ select: [commune: CommuneOption] }>()
 const query = ref('')
 const open = ref(false)
 
-/** Comparaison insensible à la casse et aux accents ("chateauroux" trouve "Châteauroux"). */
+/** Comparaison insensible à la casse, aux accents et à la ponctuation : "chateauroux"
+ *  trouve "Châteauroux", et "tour de salvagny" trouve "La Tour-de-Salvagny" (on tape
+ *  des espaces là où les noms de communes ont des tirets ou des apostrophes). */
 function normalize(s: string): string {
   return s
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
+    .replace(/[-'’]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 const suggestions = computed<CommuneOption[]>(() => {
