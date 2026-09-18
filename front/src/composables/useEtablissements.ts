@@ -4,6 +4,8 @@ export interface Praticien {
   nom: string
   prenom: string
   profession: string
+  /** Identifiant national RPPS : clé de la fiche détaillée (`/praticien/:id`, servie par l'API). */
+  id: string
 }
 
 export interface Etablissement {
@@ -15,8 +17,8 @@ export interface Etablissement {
   praticiens: Praticien[]
 }
 
-// [nom établissement, [lat, lon] | null, [[nom, prénom, profession], ...]]
-type EtablissementRow = [string, [number, number] | null, [string, string, string][]]
+// [nom établissement, [lat, lon] | null, [[nom, prénom, profession, identifiant national], ...]]
+type EtablissementRow = [string, [number, number] | null, [string, string, string, string][]]
 
 interface DeptPayload {
   updatedAt: string
@@ -58,7 +60,7 @@ export function useEtablissements() {
     const etabs = rows.map(([nom, coords, praticiens]) => ({
       nom,
       coords,
-      praticiens: praticiens.map(([nomP, prenom, prof]) => ({ nom: nomP, prenom, profession: prof })),
+      praticiens: praticiens.map(([nomP, prenom, prof, id]) => ({ nom: nomP, prenom, profession: prof, id })),
     }))
     if (!profession || profession === 'Tous') return etabs
     return etabs

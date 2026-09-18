@@ -140,11 +140,11 @@ const ETABLISSEMENTS_01 = {
         'CH Grandville',
         [45.531, 4.276],
         [
-          ['Dupont', 'Jean', 'Médecin'],
-          ['Martin', 'Claire', 'Infirmier'],
+          ['Dupont', 'Jean', 'Médecin', '810000000101'],
+          ['Martin', 'Claire', 'Infirmier', '810000000102'],
         ],
       ],
-      ['Cabinet Poulteau', null, [['Poulteau', 'Sylvain', 'Médecin']]],
+      ['Cabinet Poulteau', null, [['Poulteau', 'Sylvain', 'Médecin', '810000000103']]],
     ],
   },
 }
@@ -454,6 +454,23 @@ describe('LeafletFranceMap', () => {
     expect(wrapper.text()).toContain('Dupont')
     // Zoom "rue" (17) sur ses vraies coordonnées, pas le zoom "ville" sur la commune
     expect(setViewSpy).toHaveBeenCalledWith([45.531, 4.276], 17)
+  })
+
+  it("chaque praticien listé mène à SA fiche (lien vers /praticien/<identifiant national> dans un nouvel onglet)", async () => {
+    const wrapper = mount(LeafletFranceMap)
+    await flushPromises()
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await flushPromises()
+
+    ;(pointsAdded[0] as ReturnType<typeof makeLayer>).__handlers.click?.()
+    await wrapper.vm.$nextTick()
+
+    const links = wrapper.findAll('a.detail-card__fiche')
+    expect(links.map((l) => l.attributes('href'))).toEqual(['/praticien/810000000101', '/praticien/810000000102'])
+    expect(links.every((l) => l.attributes('target') === '_blank')).toBe(true)
   })
 
   it('cliquer le point commune liste seulement les établissements NON géocodés (les autres ont déjà leur propre point)', async () => {

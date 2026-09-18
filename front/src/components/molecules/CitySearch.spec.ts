@@ -25,6 +25,20 @@ describe('CitySearch', () => {
     expect(items[0]!.text()).toContain('Châteauroux')
   })
 
+  it.each([
+    ['tour de salvagny', 'La Tour-de-Salvagny'],
+    ['la  tour-de-salvagny', 'La Tour-de-Salvagny'],
+    ['l aigle', "L'Aigle"],
+    ["l'aigle", "L'Aigle"],
+  ])('tape « %s » -> trouve « %s » (espaces, tirets et apostrophes équivalents)', async (typed, expected) => {
+    const wrapper = mount(CitySearch, {
+      props: { communes: [...COMMUNES, { nom: 'La Tour-de-Salvagny', dept: '69', lat: 45.8, lon: 4.7, total: 500 }, { nom: "L'Aigle", dept: '61', lat: 48.7, lon: 0.6, total: 100 }] },
+    })
+    await wrapper.find('input').setValue(typed)
+    await wrapper.find('input').trigger('focus')
+    expect(wrapper.findAll('.city-search__suggestions li').map((li) => li.text())).toEqual([expect.stringContaining(expected)])
+  })
+
   it('émet "select" avec la commune choisie et vide la recherche', async () => {
     const wrapper = mount(CitySearch, { props: { communes: COMMUNES } })
     await wrapper.find('input').setValue('bourges')

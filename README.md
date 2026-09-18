@@ -15,29 +15,61 @@ L'application permet de :
 
 - **Front** (`front/`) : Vue 3 + TypeScript + Vite, carte [Leaflet](https://leafletjs.com/),
   Vitest pour les tests, ESLint pour le lint.
+- **API** (`api/`) : [Fastify](https://fastify.dev/) + TypeScript, lit une base **PostgreSQL**
+  alimentée par le RPPS. Sert la fiche détaillée d'un praticien (`GET /api/praticiens/:id`).
 - **Pipeline de données** (`scripts/`) : scripts Python qui téléchargent et retraitent le
-  RPPS, exécutés chaque jour par `.github/workflows/update-rpps.yml`.
+  RPPS pour la carte, exécutés chaque jour par `.github/workflows/update-rpps.yml`.
 
 ## Démarrer en local
 
+Avec Docker (front + API + Postgres) :
+
 ```bash
-cd front
-npm install
-npm run dev
+docker compose up
 ```
 
-Autres commandes utiles (depuis `front/`) : `npm run lint`, `npm run typecheck`,
-`npm run test:ci`, `npm run build`.
+Ou à la main : Postgres seul via Docker, puis l'API et le front.
 
-Avec Docker : `docker compose up` depuis la racine (voir `docker-compose.yml`).
+```bash
+docker compose up -d postgres
+
+cd api && npm install
+export DATABASE_URL=postgres://absante:absante@localhost:54329/absante
+npm run import:rpps -- --dir <dossier des fichiers RPPS>   # une fois, puis à chaque mise à jour (~1 min)
+npm run dev                                                # API sur http://localhost:3100
+
+cd ../front && npm install && npm run dev                  # le front joint l'API via un proxy /api
+```
+
+Commandes utiles (depuis `front/` ou `api/`) : `npm run lint`, `npm run typecheck`,
+`npm run test:ci`, `npm run build`. Les tests de l'API s'exécutent contre un vrai Postgres
+(`docker compose up -d postgres`, ou `TEST_DATABASE_URL`).
+
+## Fiche praticien
+
+Depuis la carte, chaque praticien listé a un bouton « Voir la fiche » qui ouvre
+`/praticien/<identifiant national>` dans un nouvel onglet : identité, spécialités et
+compétences, activités avec leur lieu d'exercice (adresse, téléphone, e-mail, SIRET, FINESS...),
+diplômes et autorisations. Toute information absente du RPPS est indiquée « Non renseigné ».
+
+## Base de données (API)
+
+`npm run import:rpps` (dans `api/`) charge trois fichiers RPPS « libre accès » de
+[data.gouv.fr](https://www.data.gouv.fr/datasets/annuaire-sante-extractions-des-donnees-en-libre-acces-des-professionnels-intervenant-dans-le-systeme-de-sante-rpps/) :
+`PS_LibreAcces_Personne_activite.txt`, `PS_LibreAcces_Dipl_AutExerc.txt` et
+`PS_LibreAcces_SavoirFaire.txt`. Il construit les tables dans un schéma de travail puis les
+met en service en une seule bascule : en cas d'échec (fichier tronqué, en-tête modifié, ligne
+mal formée, import déjà en cours), les données actuelles restent servies, intactes.
+La base (~1,2 Go) n'est jamais versionnée.
 
 ## Pipeline de données
 
-`scripts/update_rpps.py` télécharge le fichier RPPS brut et produit :
+Données de la carte : `scripts/update_rpps.py` télécharge le fichier RPPS brut et produit :
 - `front/public/data/rpps-departement.json` — effectif par département et par profession ;
 - `front/public/data/rpps-commune.json` — effectif par commune, avec coordonnées ;
 - `front/public/data/etablissements/{dept}.json` — le détail par établissement
-  (praticiens nommés), un fichier par département, chargé à la demande par le front.
+  (praticiens nommés avec leur identifiant national), un fichier par département, chargé à la
+  demande par le front.
 
 `scripts/geocode_etablissements.py` géocode l'adresse de chaque établissement via la
 [Base Adresse Nationale](https://adresse.data.gouv.fr/) (gratuite, sans clé) et alimente
