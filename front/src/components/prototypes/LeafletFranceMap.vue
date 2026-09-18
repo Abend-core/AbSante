@@ -38,6 +38,8 @@ const FRANCE_ZOOM = 5
  *  scripts/geocode_etablissements.py) — plus précis que le zoom "ville" utilisé
  *  quand on ne connaît que les coordonnées de la commune. */
 const ETABLISSEMENT_ZOOM = 17
+const ETABLISSEMENTS_PANE = 'etablissements'
+const REPERE_PANE = 'repere'
 
 let map: L.Map | null = null
 let polygonsLayer: L.GeoJSON | null = null
@@ -158,11 +160,6 @@ function focusCity(lat: number, lon: number, zoom: number) {
   map.setView([lat, lon], zoom)
   cityHighlight.setLatLng([lat, lon])
   cityHighlight.addTo(map)
-  // Sur un établissement, l'anneau se retrouve exactement à la même position que son
-  // propre point (même coordonnées géocodées) -> sans ça, le point (ajouté après dans
-  // le SVG) passe au-dessus et intercepte le clic destiné à l'anneau (vérifié : le clic
-  // retombait sur le point rouge, pas l'anneau, "Retour" ne faisait alors plus rien).
-  cityHighlight.bringToFront()
 }
 
 function clearCityHighlight() {
@@ -176,6 +173,14 @@ function initMap() {
   if (!mapDiv.value || currentFeatures.value.length === 0) return
 
   map = L.map(mapDiv.value, { center: FRANCE_CENTER, zoom: FRANCE_ZOOM })
+  // Calques dédiés, toujours au-dessus des départements (overlayPane, z-index 400) :
+  // l'ordre d'empilement ne dépend plus de qui a été ajouté ou survolé en dernier.
+  // Sans ça, le bringToFront() du département survolé (voir plus bas) le remontait
+  // par-dessus les points, qui devenaient impossibles à cliquer (le clic tombait sur
+  // le département). Et l'anneau, posé sur le même point qu'un établissement, reste
+  // au-dessus de celui-ci pour rester cliquable.
+  map.createPane(ETABLISSEMENTS_PANE).style.zIndex = '450'
+  map.createPane(REPERE_PANE).style.zIndex = '460'
   // Fond de plan OpenStreetMap standard : pas de clé requise, contrairement
   // aux styles CARTO hébergés (basemaps.cartocdn.com exige désormais une clé
   // API sur leur offre gratuite, vérifié par capture d'écran -> tuiles
@@ -249,6 +254,7 @@ function initMap() {
     fill: true,
     fillOpacity: 0.01,
     interactive: true,
+    pane: REPERE_PANE,
   })
   cityHighlight.on('click', goBack)
   cityHighlight.bindTooltip('Revenir en arrière', { direction: 'top', offset: [0, -16] })
@@ -265,6 +271,7 @@ function makeMarker(lat: number, lon: number): L.CircleMarker {
     fillColor: '#d9534f',
     fillOpacity: 0.7,
     stroke: false,
+    pane: ETABLISSEMENTS_PANE,
   })
 }
 
