@@ -54,6 +54,45 @@ Depuis la carte, chaque praticien listé a un bouton « Voir la fiche » qui ouv
 compétences, activités avec leur lieu d'exercice (adresse, téléphone, e-mail, SIRET, FINESS...),
 diplômes et autorisations. Toute information absente du RPPS est indiquée « Non renseigné ».
 
+## Déploiement (Raspberry Pi)
+
+L'application tourne sur le Raspberry Pi, derrière le Traefik du dossier `~/infra` (HTTPS
+Let's Encrypt, CrowdSec, limitation de débit) : **https://absante.rxdy.fr**. Le sous-domaine
+résout déjà vers le Pi (DNS générique), aucun réglage DNS n'est nécessaire.
+
+> ⚠️ **Ne jamais construire ni importer massivement sur le Pi.** Son watchdog
+> (`/usr/local/bin/watchdog-check.sh`) le **redémarre quand la charge dépasse 10**, ce qu'un
+> `npm ci`, un build ou une restauration de base suffisent à provoquer (et tous les sites
+> tombent quelques minutes). Les images sont construites sur un autre poste.
+
+**Déployer** (depuis un poste avec Docker et un accès SSH au Pi) :
+
+```bash
+scripts/deploy_pi.sh            # construit en arm64, envoie, redémarre ; refuse si la charge du Pi > 5
+```
+
+**Première installation** (une seule fois) :
+
+```bash
+git clone https://github.com/Abend-core/AbSante.git ~/absante && cd ~/absante   # sur le Pi
+cp .env.example .env && echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env  # puis nettoyer .env
+docker compose -f docker-compose.prod.yml up -d postgres
+```
+
+Les données du répertoire viennent d'un dump de la base d'un autre poste
+(`pg_dump -n rpps -Fc`), restauré **sans parallélisme** et en surveillant la charge :
+
+```bash
+docker exec -e PGOPTIONS="-c synchronous_commit=off -c max_parallel_maintenance_workers=0" \
+  absante-postgres pg_restore -U absante -d absante --no-owner -j 1 /tmp/rpps.dump
+```
+
+Sur la carte SD, la restauration fait monter la charge : la mettre en pause (`docker pause
+absante-postgres`) au-delà de 6 et la reprendre sous 3. Elle prend une quinzaine de minutes.
+
+Les conteneurs n'ont pas de plafond mémoire effectif sur ce Pi (le cgroup mémoire est désactivé) ;
+la base est réglée pour rester sobre (`shared_buffers=128MB`, 30 connexions).
+
 ## Application installable (PWA)
 
 Le bouton **Installer l'application** du header installe AbSante en un clic, comme une

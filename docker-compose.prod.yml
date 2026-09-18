@@ -1,0 +1,107 @@
+# Production sur le Raspberry Pi, derrière le Traefik du dossier ~/infra (HTTPS Let's Encrypt,
+# CrowdSec, limitation de débit : tout cela est déjà appliqué par Traefik à tous les sites).
+# Même modèle que les autres projets : réseau externe `web`, routage par labels.
+#
+# Les images (api, front) ne sont JAMAIS construites sur le Pi : son watchdog le redémarre quand
+# la charge dépasse 10, ce qu'un `npm ci` suffit à provoquer. Elles sont construites ailleurs
+# (scripts/deploy_pi.sh : buildx, plateforme linux/arm64), envoyées avec `docker load`, puis
+# démarrées ici sans construction ni téléchargement (`pull_policy: never`).
+#
+# Démarrage : cp .env.example .env  (puis remplir POSTGRES_PASSWORD)
+#             docker compose -f docker-compose.prod.yml up -d --no-build
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: absante-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: absante
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant, voir .env.example}"
+      POSTGRES_DB: absante
+    # Réglé pour un Pi partagé (4 Go pour ~20 conteneurs) : la base n'est lue que par
+    # identifiant, elle n'a pas besoin de plus.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=96MB
+      - -c
+      - max_connections=30
+      - -c
+      - max_wal_size=1GB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Aucun port publié : seule l'API, sur le réseau interne, peut joindre la base.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U absante -d absante"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 512m
+    labels:
+      # Images construites sur place (pas sur un registre) : Watchtower ne doit pas y toucher.
+      - com.centurylinklabs.watchtower.enable=false
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build:
+      context: ./api
+    image: absante-api:prod
+    pull_policy: never
+    container_name: absante-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://absante:${POSTGRES_PASSWORD}@postgres:5432/absante
+      PORT: "3100"
+      LOG_LEVEL: info
+      # Derrière Traefik puis nginx : l'IP du visiteur vient de X-Forwarded-For.
+      TRUST_PROXY: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 192m
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+    logging: *logging
+
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile.prod
+    image: absante-front:prod
+    pull_policy: never
+    container_name: absante-front
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 64m
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+      - traefik.enable=true
+      - traefik.http.routers.absante.entrypoints=websecure
+      - traefik.http.routers.absante.rule=Host(`${ABSANTE_HOST:-absante.rxdy.fr}`)
+      - traefik.http.routers.absante.tls.certresolver=leresolver
+      - traefik.http.services.absante.loadbalancer.server.port=80
+    networks:
+      - default
+      - web
+    logging: *logging
+
+networks:
+  default: {}
+  web:
+    external: true
+
+volumes:
+  pgdata:
