@@ -69,6 +69,7 @@ vi.mock('leaflet', () => {
     remove: removeSpy,
     removeLayer: vi.fn(),
     hasLayer: vi.fn(() => true),
+    createPane: vi.fn(() => document.createElement('div')),
     zoomControl: { setPosition: vi.fn() },
   }
 
@@ -260,6 +261,24 @@ describe('LeafletFranceMap', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).not.toContain('Ain')
     expect(wrapper.text()).not.toContain('Testville')
+  })
+
+  it("les points et l'anneau vivent dans leurs propres calques, au-dessus des départements (régression : le département survolé remontait par-dessus les points et les rendait incliquables)", async () => {
+    const { default: L } = await import('leaflet')
+    mount(LeafletFranceMap)
+    await flushPromises()
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await flushPromises()
+
+    const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [unknown, { pane?: string; radius: number }][]
+    const ring = calls.find((c) => c[1].radius === 16)
+    const points = calls.filter((c) => c[1].radius === 5)
+    expect(ring?.[1].pane).toBe('repere')
+    expect(points.length).toBeGreaterThan(0)
+    for (const p of points) expect(p[1].pane).toBe('etablissements')
   })
 
   it('les établissements sont désactivés par défaut', async () => {
