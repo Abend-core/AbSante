@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import PillBadge from '../atoms/PillBadge.vue'
 import type { SavoirFaire } from '../../types/fiche'
 
 const props = defineProps<{ items: SavoirFaire[] }>()
@@ -20,11 +21,13 @@ const groups = computed(() => {
     <div v-for="group in groups" :key="group.type" class="savoir-faire__group">
       <h3 class="savoir-faire__type">{{ group.type }}</h3>
       <ul class="savoir-faire__chips">
-        <li v-for="(item, i) in group.list" :key="`${item.code}-${i}`" class="savoir-faire__chip">
-          <span v-if="item.libelle">{{ item.libelle }}</span>
-          <span v-else class="savoir-faire__missing" data-missing>Libellé non renseigné</span>
-          <span v-if="item.code" class="savoir-faire__code">{{ item.code }}</span>
-          <span v-if="item.profession" class="savoir-faire__profession">— {{ item.profession }}</span>
+        <li v-for="(item, i) in group.list" :key="`${item.code}-${i}`">
+          <PillBadge variant="chip">
+            <span v-if="item.libelle">{{ item.libelle }}</span>
+            <span v-else class="savoir-faire__missing" data-missing>Libellé non renseigné</span>
+            <span v-if="item.code" class="savoir-faire__code">{{ item.code }}</span>
+            <span v-if="item.profession" class="savoir-faire__profession">— {{ item.profession }}</span>
+          </PillBadge>
         </li>
       </ul>
     </div>
@@ -54,19 +57,6 @@ const groups = computed(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.savoir-faire__chip {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 0.45rem;
-  padding: 0.3rem 0.8rem;
-  border-radius: 12px;
-  background: var(--brand-soft);
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text-h);
 }
 
 .savoir-faire__code,

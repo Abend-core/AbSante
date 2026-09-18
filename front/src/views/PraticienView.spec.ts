@@ -66,13 +66,23 @@ describe('PraticienView', () => {
     expect(text).toContain('Fiche mise à jour le 18 septembre 2026')
   })
 
-  it("présente le profil en en-tête : initiales, profession et commune d'exercice", async () => {
+  it("présente le profil en en-tête (profession, commune d'exercice) sans avatar ni lien de retour", async () => {
     vi.stubGlobal('fetch', vi.fn(() => respond(200)))
     const wrapper = await mountAt('810006881261')
     const header = wrapper.find('.fiche-header')
-    expect(header.find('.fiche-header__avatar').text()).toBe('SB')
     expect(header.find('.fiche-header__professions').text()).toBe('Technicien de Laboratoire')
     expect(header.find('.fiche-header__places').text()).toContain('La Tour-de-Salvagny (69890)')
+    expect(wrapper.find('.fiche-header__avatar').exists()).toBe(false)
+    expect(wrapper.text()).not.toMatch(/Retour à la carte/i)
+  })
+
+  it('propose de copier les informations utiles : identifiant RPPS et identifiant PP', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => respond(200)))
+    const wrapper = await mountAt('810006881261')
+    const labels = wrapper.findAll('.copy-button__button').map((b) => b.attributes('aria-label'))
+    expect(labels).toContain("Copier l'identifiant RPPS")
+    expect(labels).toContain("Copier l'adresse complète")
+    expect(labels).toContain('Copier le SIRET')
   })
 
   it('signale clairement chaque information manquante (spécialités, téléphone, e-mail...)', async () => {

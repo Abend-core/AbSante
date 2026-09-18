@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import InfoRow from '../atoms/InfoRow.vue'
 import type { Fiche } from '../../types/fiche'
 import { titleCase } from '../../utils/format'
+import InfoRow from './InfoRow.vue'
 
 defineProps<{ fiche: Fiche }>()
 </script>
@@ -12,8 +12,8 @@ defineProps<{ fiche: Fiche }>()
     <InfoRow label="Civilité d'exercice" :value="fiche.civiliteExercice" />
     <InfoRow label="Nom d'exercice" :value="fiche.nom" />
     <InfoRow label="Prénom d'exercice" :value="fiche.prenom ? titleCase(fiche.prenom) : null" />
-    <InfoRow label="Identifiant national (RPPS)" :value="fiche.id" wide />
-    <InfoRow label="Identifiant PP" :value="fiche.identifiantPP" />
+    <InfoRow label="Identifiant national (RPPS)" :value="fiche.id" :copy="fiche.id" copy-label="l'identifiant RPPS" wide />
+    <InfoRow label="Identifiant PP" :value="fiche.identifiantPP" :copy="fiche.identifiantPP ?? undefined" />
     <InfoRow label="Type d'identifiant" :value="fiche.typeIdentifiant" />
   </dl>
 </template>

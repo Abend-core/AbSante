@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import PillBadge from '../atoms/PillBadge.vue'
+import CopyButton from '../atoms/CopyButton.vue'
+
 defineProps<{
   label: string
   /** `null` / vide -> « Non renseigné » affiché clairement (jamais une ligne vide ou masquée). */
   value: string | null | undefined
   /** Occupe toute la largeur de la grille (adresse, libellés longs). */
   wide?: boolean
+  /** Texte à copier : affiche un bouton de copie à côté de la valeur (seulement si la valeur existe). */
+  copy?: string
+  /** Nom de ce qui est copié quand il diffère du libellé (« l'adresse complète »). */
+  copyLabel?: string
 }>()
 </script>
 
@@ -13,9 +20,10 @@ defineProps<{
     <dt class="info-row__label">{{ label }}</dt>
     <dd class="info-row__value">
       <template v-if="value">
-        <slot>{{ value }}</slot>
+        <span class="info-row__content"><slot>{{ value }}</slot></span>
+        <CopyButton v-if="copy" :text="copy" :label="copyLabel ?? label.toLowerCase()" />
       </template>
-      <span v-else class="info-row__missing" data-missing>Non renseigné</span>
+      <PillBadge v-else variant="missing" data-missing>Non renseigné</PillBadge>
     </dd>
   </div>
 </template>
@@ -39,33 +47,17 @@ defineProps<{
 }
 
 .info-row__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.5rem;
   margin: 0;
   font-size: 0.97rem;
   color: var(--text-h);
+}
+
+.info-row__content {
+  min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.info-row__value :deep(a) {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--brand);
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.info-row__value :deep(a:hover) {
-  text-decoration: underline;
-}
-
-/* Une information absente du RPPS doit se voir sans jamais ressembler à une valeur. */
-.info-row__missing {
-  display: inline-block;
-  padding: 0.05rem 0.6rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-style: italic;
-  color: var(--muted);
 }
 </style>
