@@ -281,6 +281,47 @@ describe('LeafletFranceMap', () => {
     for (const p of points) expect(p[1].pane).toBe('etablissements')
   })
 
+  it("l'anneau « retour » n'a pas de remplissage et passe sous les points (régression : son disque cliquable rendait inutilisable tout établissement qu'il entourait)", async () => {
+    const { default: L } = await import('leaflet')
+    mount(LeafletFranceMap)
+    await flushPromises()
+
+    const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [unknown, { radius: number; fill?: boolean }][]
+    expect(calls.find((c) => c[1].radius === 16)?.[1].fill).toBe(false)
+
+    const mapMock = (L.map as ReturnType<typeof vi.fn>).mock.results[0].value as { createPane: ReturnType<typeof vi.fn> }
+    const zIndexOf = (name: string) => {
+      const i = mapMock.createPane.mock.calls.findIndex((c) => c[0] === name)
+      return Number((mapMock.createPane.mock.results[i].value as HTMLElement).style.zIndex)
+    }
+    expect(zIndexOf('repere')).toBeLessThan(zIndexOf('etablissements'))
+  })
+
+  it("recliquer la commune déjà affichée n'ajoute pas d'étape : l'anneau ramène au département, pas sur la même fiche", async () => {
+    stubFetch(COMMUNE_PAYLOAD, { updatedAt: '2026-09-17T00:00:00Z', communes: {} })
+    const wrapper = mount(LeafletFranceMap)
+    await flushPromises()
+
+    const { default: L } = await import('leaflet')
+    const ring = (L.circleMarker as ReturnType<typeof vi.fn>).mock.results[0].value as ReturnType<typeof makeLayer>
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await flushPromises()
+
+    const communeMarker = pointsAdded[0] as ReturnType<typeof makeLayer>
+    communeMarker.__handlers.click?.()
+    communeMarker.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Testville')
+
+    ring.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).not.toContain('Testville')
+    expect(wrapper.text()).toContain('Ain')
+  })
+
   it('les établissements sont désactivés par défaut', async () => {
     const { default: L } = await import('leaflet')
     mount(LeafletFranceMap)
