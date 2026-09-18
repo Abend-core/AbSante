@@ -2,8 +2,13 @@
 # CrowdSec, limitation de débit : tout cela est déjà appliqué par Traefik à tous les sites).
 # Même modèle que les autres projets : réseau externe `web`, routage par labels.
 #
+# Les images (api, front) ne sont JAMAIS construites sur le Pi : son watchdog le redémarre quand
+# la charge dépasse 10, ce qu'un `npm ci` suffit à provoquer. Elles sont construites ailleurs
+# (scripts/deploy_pi.sh : buildx, plateforme linux/arm64), envoyées avec `docker load`, puis
+# démarrées ici sans construction ni téléchargement (`pull_policy: never`).
+#
 # Démarrage : cp .env.example .env  (puis remplir POSTGRES_PASSWORD)
-#             docker compose -f docker-compose.prod.yml up -d --build
+#             docker compose -f docker-compose.prod.yml up -d --no-build
 services:
   postgres:
     image: postgres:16-alpine
@@ -51,6 +56,8 @@ services:
   api:
     build:
       context: ./api
+    image: absante-api:prod
+    pull_policy: never
     container_name: absante-api
     restart: unless-stopped
     environment:
@@ -71,6 +78,8 @@ services:
     build:
       context: ./front
       dockerfile: Dockerfile.prod
+    image: absante-front:prod
+    pull_policy: never
     container_name: absante-front
     restart: unless-stopped
     depends_on:
