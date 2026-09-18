@@ -46,6 +46,57 @@ let cityHighlight: L.CircleMarker | null = null
 let resetButton: HTMLButtonElement | null = null
 let colorScale = createColorScale([1])
 
+/** Pile des vues visitées (France -> département -> ville -> établissement...) pour
+ *  permettre au clic sur l'anneau bleu de revenir en arrière PAS À PAS, pas
+ *  directement à la vue France (c'est le rôle du bouton "retour" en haut à droite). */
+interface ViewSnapshot {
+  lat: number
+  lon: number
+  zoom: number
+  zoomedDept: string | null
+  selectedPoint: typeof selectedPoint.value
+  selectedDept: typeof selectedDept.value
+  ring: { lat: number; lon: number } | null
+}
+let viewStack: ViewSnapshot[] = []
+
+function pushView() {
+  if (!map) return
+  const center = map.getCenter()
+  const ringVisible = !!(cityHighlight && map.hasLayer(cityHighlight))
+  const ringPos = ringVisible ? cityHighlight!.getLatLng() : null
+  viewStack.push({
+    lat: center.lat,
+    lon: center.lng,
+    zoom: map.getZoom(),
+    zoomedDept: stats.zoomedDept.value,
+    selectedPoint: selectedPoint.value,
+    selectedDept: selectedDept.value,
+    ring: ringPos ? { lat: ringPos.lat, lon: ringPos.lng } : null,
+  })
+}
+
+/** Clic sur l'anneau bleu : revient à l'état précédent (établissement -> ville ->
+ *  département -> France), une étape à la fois. Pile vide -> plus rien avant,
+ *  équivaut à la vue France entière. */
+function goBack() {
+  const prev = viewStack.pop()
+  if (!prev || !map) {
+    resetZoom()
+    return
+  }
+  stats.zoomedDept.value = prev.zoomedDept
+  selectedPoint.value = prev.selectedPoint
+  selectedDept.value = prev.selectedDept
+  map.setView([prev.lat, prev.lon], prev.zoom)
+  if (prev.ring && cityHighlight) {
+    cityHighlight.setLatLng([prev.ring.lat, prev.ring.lon])
+    cityHighlight.addTo(map)
+  } else {
+    clearCityHighlight()
+  }
+}
+
 function valueFor(feature: GeoFeature): number {
   return stats.byDepartement.value[feature.properties.code] ?? 0
 }
@@ -107,6 +158,11 @@ function focusCity(lat: number, lon: number, zoom: number) {
   map.setView([lat, lon], zoom)
   cityHighlight.setLatLng([lat, lon])
   cityHighlight.addTo(map)
+  // Sur un établissement, l'anneau se retrouve exactement à la même position que son
+  // propre point (même coordonnées géocodées) -> sans ça, le point (ajouté après dans
+  // le SVG) passe au-dessus et intercepte le clic destiné à l'anneau (vérifié : le clic
+  // retombait sur le point rouge, pas l'anneau, "Retour" ne faisait alors plus rien).
+  cityHighlight.bringToFront()
 }
 
 function clearCityHighlight() {
@@ -153,6 +209,15 @@ function initMap() {
         layer.on('mouseover', () => (layer as L.Path).setStyle({ weight: 2, color: '#333' }))
         layer.on('mouseout', () => polygonsLayer?.resetStyle(layer as L.Path))
         layer.on('click', () => {
+          // Le polygone département couvre TOUTE sa surface, y compris une fois zoomé
+          // dedans (ville, établissement) -> sans ce garde-fou, cliquer n'importe où
+          // sur la carte (même loin d'un point) redéclenchait le fitBounds et
+          // ramenait brutalement à la vue département, sans marge d'erreur pour
+          // cliquer un point précis. On ignore le clic si on est déjà zoomé sur CE
+          // département ; cliquer un AUTRE département reste une navigation valide.
+          if (f.properties.code === stats.zoomedDept.value) return
+          viewStack = []
+          pushView()
           selectedPoint.value = null
           selectedDept.value = { nom: f.properties.nom, n: valueFor(f) }
           clearCityHighlight()
@@ -163,13 +228,21 @@ function initMap() {
     },
   ).addTo(map)
 
+  // fill quasi-invisible (0.01, pas 0) -> tout le disque est cliquable, pas
+  // seulement le trait du contour (cible bien trop fine pour cliquer dessus).
+  // Vérifié : à fillOpacity exactement 0, le SVG ne compte plus la forme comme
+  // "painted" et les clics passent au travers (aucun gestionnaire déclenché) —
+  // 0.01 reste visuellement invisible mais reçoit bien les clics.
   cityHighlight = L.circleMarker(FRANCE_CENTER, {
     radius: 16,
     color: '#1e88e5',
     weight: 3,
-    fill: false,
-    interactive: false,
+    fill: true,
+    fillOpacity: 0.01,
+    interactive: true,
   })
+  cityHighlight.on('click', goBack)
+  cityHighlight.bindTooltip('Revenir en arrière', { direction: 'top', offset: [0, -16] })
 
   pointsLayer = L.layerGroup()
   if (showEtablissements.value) pointsLayer.addTo(map)
@@ -190,6 +263,7 @@ function makeMarker(lat: number, lon: number): L.CircleMarker {
  *  Zoome sur sa vraie position géocodée si connue (précision "rue"), sinon sur
  *  la commune (on ne sait rien de plus précis). */
 function showEtablissement(etab: Etablissement, communeNom: string, communeLat: number, communeLon: number) {
+  pushView()
   selectedDept.value = null
   selectedPoint.value = { nom: `${etab.nom} (${communeNom})`, n: etab.praticiens.length, praticiens: etab.praticiens }
   if (etab.coords) focusCity(etab.coords[0], etab.coords[1], ETABLISSEMENT_ZOOM)
@@ -241,6 +315,7 @@ function refreshData() {
       // et enchaîne sur un zoom "ville" adapté à sa taille -> après le zoom
       // département, on peut zoomer davantage sur une commune précise.
       marker.on('click', () => {
+        pushView()
         selectedDept.value = null
         selectedPoint.value = { nom: p.nom, n: p.n, etablissements: ungeocoded.length > 0 ? ungeocoded : undefined }
         focusCity(p.lat, p.lon, cityZoomFor(p.total))
@@ -261,6 +336,7 @@ function onSelectEtablissement(etab: Etablissement) {
 }
 
 function resetZoom() {
+  viewStack = []
   map?.setView(FRANCE_CENTER, FRANCE_ZOOM)
   stats.zoomedDept.value = null
   clearCityHighlight()
@@ -270,9 +346,14 @@ function resetZoom() {
 
 /** Recherche de ville : zoome directement dessus, quel que soit le département
  *  déjà affiché. Le nombre affiché respecte le filtre de profession actif (pas
- *  le total "Tous" utilisé uniquement comme proxy de taille pour le zoom). */
+ *  le total "Tous" utilisé uniquement comme proxy de taille pour le zoom). Une
+ *  recherche repart d'un historique propre (retour = là où on était avant la
+ *  recherche, pas un ancien fil de navigation sans rapport).
+ */
 function selectCity(c: CommuneOption) {
   if (!map) return
+  viewStack = []
+  pushView()
   const match = stats.points.value.find((p) => p.dept === c.dept && p.nom === c.nom)
   selectedDept.value = null
   selectedPoint.value = { nom: c.nom, n: match?.n ?? 0 }
