@@ -72,6 +72,7 @@ restore_pid=$!
 # Garde-fou de charge : lancé APRÈS le démarrage de pg_restore (un `docker exec` sur une base déjà
 # en pause échoue). Il ne garde pas le descripteur du verrou (9>&-), sinon le verrou survivrait au script.
 sleep 5
+echo 0 > "$WORK/peak"
 (
   peak=0
   while :; do
