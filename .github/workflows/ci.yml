@@ -5,6 +5,10 @@ on:
     branches: [main, staging, dev]
   pull_request:
     branches: [main, staging, dev]
+  # Une PR ouverte avec le jeton d'Actions (mise à jour quotidienne des données) ne déclenche pas la
+  # CI : update-rpps.yml la lance à la main sur la branche, et ses résultats (Lint / Tests /
+  # Build) s'attachent au commit, ce qui débloque la fusion automatique.
+  workflow_dispatch:
 
 jobs:
   lint:

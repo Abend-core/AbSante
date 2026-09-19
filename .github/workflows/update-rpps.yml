@@ -12,6 +12,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write # lancer la CI sur la branche (voir plus bas)
     steps:
       - uses: actions/checkout@v4
 
@@ -59,3 +60,7 @@ jobs:
             --body "Régénéré automatiquement par .github/workflows/update-rpps.yml." \
             || echo "PR déjà ouverte, réutilisation"
           gh pr merge automated/rpps-data-update --squash --auto
+          # Les PR créées avec le jeton d'Actions ne déclenchent pas la CI : sans cette ligne, les
+          # vérifications obligatoires (Lint / Tests / Build) resteraient en attente et la fusion
+          # automatique ne partirait jamais.
+          gh workflow run ci.yml --ref automated/rpps-data-update

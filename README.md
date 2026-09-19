@@ -61,34 +61,42 @@ Let's Encrypt, CrowdSec, limitation de débit) : **https://absante.rxdy.fr**. Le
 résout déjà vers le Pi (DNS générique), aucun réglage DNS n'est nécessaire.
 
 > ⚠️ **Ne jamais construire ni importer massivement sur le Pi.** Son watchdog
-> (`/usr/local/bin/watchdog-check.sh`) le **redémarre quand la charge dépasse 10**, ce qu'un
-> `npm ci`, un build ou une restauration de base suffisent à provoquer (et tous les sites
-> tombent quelques minutes). Les images sont construites sur un autre poste.
+> (`/usr/local/bin/watchdog-check.sh`) le **redémarre quand la charge (1 min) dépasse 10**, ce
+> qu'un `npm ci`, un build ou une restauration de base suffisent à provoquer (et tous les sites
+> tombent quelques minutes). Tout ce qui est lourd se fait sur GitHub.
 
-**Déployer** (depuis un poste avec Docker et un accès SSH au Pi) :
+### Mise à jour automatique, chaque jour
+
+| Quoi | Où | Comment |
+|---|---|---|
+| Données de la carte (fichiers JSON) | GitHub, 5h UTC | `update-rpps.yml` ouvre une PR, la CI est lancée à la main sur sa branche (une PR du jeton d'Actions ne la déclenche pas) puis fusion automatique |
+| Images `api` et `front` (arm64) | GitHub, à chaque fusion dans `main` | `deploy-images.yml` publie sur GHCR ; **Watchtower** (déjà en place sur le Pi) récupère l'image et recrée le conteneur |
+| Base de données (fiches) | GitHub, 5h30 UTC | `publish-db.yml` importe le RPPS dans un PostgreSQL éphémère et publie un dump dans la release `data-latest` |
+| Restauration du dump | Pi, 4h (cron) | `scripts/pi_update_db.sh` : restaure à côté du schéma en service, vérifie, puis bascule par renommage |
+
+`scripts/pi_update_db.sh` protège le Pi : il ne démarre pas si la charge dépasse 3, vérifie la somme
+de contrôle du dump, met la base en pause dès que la charge atteint 5 (reprise sous 3) et lève
+toujours la pause à la fin. Le site reste servi pendant l'opération et, en cas d'échec, les données
+actuelles restent intactes (journal : `~/absante/update-db.log`).
+
+Installation du cron sur le Pi (une seule fois) :
 
 ```bash
-scripts/deploy_pi.sh            # construit en arm64, envoie, redémarre ; refuse si la charge du Pi > 5
+( crontab -l 2>/dev/null; echo '0 4 * * * $HOME/absante/scripts/pi_update_db.sh >> $HOME/absante/update-db.log 2>&1' ) | crontab -
 ```
 
-**Première installation** (une seule fois) :
+### Première installation (une seule fois)
 
 ```bash
-git clone https://github.com/Abend-core/AbSante.git ~/absante && cd ~/absante   # sur le Pi
-cp .env.example .env && echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env  # puis nettoyer .env
+git clone https://github.com/Abend-core/AbSante.git ~/absante && cd ~/absante          # sur le Pi
+cp .env.example .env    # puis renseigner POSTGRES_PASSWORD (openssl rand -hex 24)
 docker compose -f docker-compose.prod.yml up -d postgres
+scripts/pi_update_db.sh                       # première restauration de la base (~25 min, gardée)
+docker compose -f docker-compose.prod.yml up -d --no-build
 ```
 
-Les données du répertoire viennent d'un dump de la base d'un autre poste
-(`pg_dump -n rpps -Fc`), restauré **sans parallélisme** et en surveillant la charge :
-
-```bash
-docker exec -e PGOPTIONS="-c synchronous_commit=off -c max_parallel_maintenance_workers=0" \
-  absante-postgres pg_restore -U absante -d absante --no-owner -j 1 /tmp/rpps.dump
-```
-
-Sur la carte SD, la restauration fait monter la charge : la mettre en pause (`docker pause
-absante-postgres`) au-delà de 6 et la reprendre sous 3. Elle prend une quinzaine de minutes.
+En secours, `scripts/deploy_pi.sh` construit les images sur un autre poste et les envoie par SSH
+(il refuse si la charge du Pi dépasse 5).
 
 Les conteneurs n'ont pas de plafond mémoire effectif sur ce Pi (le cgroup mémoire est désactivé) ;
 la base est réglée pour rester sobre (`shared_buffers=128MB`, 30 connexions).

@@ -3,12 +3,14 @@
 # Même modèle que les autres projets : réseau externe `web`, routage par labels.
 #
 # Les images (api, front) ne sont JAMAIS construites sur le Pi : son watchdog le redémarre quand
-# la charge dépasse 10, ce qu'un `npm ci` suffit à provoquer. Elles sont construites ailleurs
-# (scripts/deploy_pi.sh : buildx, plateforme linux/arm64), envoyées avec `docker load`, puis
-# démarrées ici sans construction ni téléchargement (`pull_policy: never`).
+# la charge dépasse 10, ce qu'un `npm ci` suffit à provoquer. Elles sont construites par GitHub
+# (.github/workflows/deploy-images.yml, plateforme linux/arm64) et publiées sur GHCR ; Watchtower,
+# déjà en place sur ce Pi, récupère chaque nouvelle image et recrée le conteneur (label ci-dessous).
+# En secours, scripts/deploy_pi.sh construit sur un autre poste et envoie l'image par SSH.
 #
 # Démarrage : cp .env.example .env  (puis remplir POSTGRES_PASSWORD)
 #             docker compose -f docker-compose.prod.yml up -d --no-build
+# Base de données : mise à jour chaque nuit par scripts/pi_update_db.sh (cron, voir README).
 services:
   postgres:
     image: postgres:16-alpine
@@ -45,7 +47,7 @@ services:
       start_period: 20s
     mem_limit: 512m
     labels:
-      # Images construites sur place (pas sur un registre) : Watchtower ne doit pas y toucher.
+      # Jamais de mise à jour automatique de la base (données, version majeure de Postgres).
       - com.centurylinklabs.watchtower.enable=false
     logging: &logging
       driver: json-file
@@ -56,8 +58,7 @@ services:
   api:
     build:
       context: ./api
-    image: absante-api:prod
-    pull_policy: never
+    image: ghcr.io/abend-core/absante-api:latest
     container_name: absante-api
     restart: unless-stopped
     environment:
@@ -71,15 +72,14 @@ services:
         condition: service_healthy
     mem_limit: 192m
     labels:
-      - com.centurylinklabs.watchtower.enable=false
+      - com.centurylinklabs.watchtower.enable=true
     logging: *logging
 
   front:
     build:
       context: ./front
       dockerfile: Dockerfile.prod
-    image: absante-front:prod
-    pull_policy: never
+    image: ghcr.io/abend-core/absante-front:latest
     container_name: absante-front
     restart: unless-stopped
     depends_on:
@@ -87,7 +87,7 @@ services:
         condition: service_healthy
     mem_limit: 64m
     labels:
-      - com.centurylinklabs.watchtower.enable=false
+      - com.centurylinklabs.watchtower.enable=true
       - traefik.enable=true
       - traefik.http.routers.absante.entrypoints=websecure
       - traefik.http.routers.absante.rule=Host(`${ABSANTE_HOST:-absante.rxdy.fr}`)
