@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Déploie AbSante sur le Raspberry Pi SANS JAMAIS construire dessus.
+# SECOURS : déploie AbSante sur le Raspberry Pi sans passer par GHCR / Watchtower (le déploiement
+# normal est automatique : .github/workflows/deploy-images.yml), et SANS JAMAIS construire sur le Pi.
 #
 # Le watchdog du Pi (/usr/local/bin/watchdog-check.sh) le redémarre quand la charge (1 min)
 # dépasse 10 : un `npm ci` ou un build y suffit. Les images sont donc construites ici
@@ -24,8 +25,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "→ Construction des images arm64 (sur cette machine)"
-docker buildx build --platform linux/arm64 -t absante-api:prod --output "type=docker,dest=$TMP/api.tar" ./api
-docker buildx build --platform linux/arm64 -f front/Dockerfile.prod -t absante-front:prod \
+docker buildx build --platform linux/arm64 -t ghcr.io/abend-core/absante-api:latest --output "type=docker,dest=$TMP/api.tar" ./api
+docker buildx build --platform linux/arm64 -f front/Dockerfile.prod -t ghcr.io/abend-core/absante-front:latest \
   --output "type=docker,dest=$TMP/front.tar" ./front
 
 for image in api front; do
