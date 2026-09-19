@@ -75,7 +75,7 @@ résout déjà vers le Pi (DNS générique), aucun réglage DNS n'est nécessair
 | Restauration du dump | Pi, 4h (cron) | `scripts/pi_update_db.sh` : restaure à côté du schéma en service, vérifie, puis bascule par renommage |
 
 `scripts/pi_update_db.sh` protège le Pi : il ne démarre pas si la charge dépasse 3, vérifie la somme
-de contrôle du dump, met la base en pause dès que la charge atteint 5 (reprise sous 3) et lève
+de contrôle du dump, met la base en pause dès que la charge atteint 4 (reprise sous 2) et lève
 toujours la pause à la fin. Le site reste servi pendant l'opération et, en cas d'échec, les données
 actuelles restent intactes (journal : `~/absante/update-db.log`).
 
