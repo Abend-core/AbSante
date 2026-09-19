@@ -8,7 +8,9 @@
 # GARDE-FOUS DE CHARGE : le watchdog du Pi (/usr/local/bin/watchdog-check.sh) le redémarre quand
 # la charge (1 min) dépasse 10. La restauration écrit beaucoup sur la carte SD, donc :
 #   - on ne démarre pas si le Pi est déjà chargé (on retentera la nuit suivante) ;
-#   - la base est mise en pause dès que la charge atteint HIGH et reprise sous LOW ;
+#   - la base est mise en pause dès que la charge atteint HIGH et reprise sous LOW (décision prise sur
+#     l'ÉTAT RÉEL du conteneur, jamais sur une variable : ne pas mettre la base en pause à la main
+#     pendant l'exécution, cela désynchronise Docker et le gel du cgroup) ;
 #   - la pause est TOUJOURS levée à la fin, même en cas d'erreur.
 set -uo pipefail
 
@@ -18,8 +20,8 @@ CONTAINER=absante-postgres
 STATE="$DIR/.db-sha256"
 WORK="$DIR/tmp-update"
 MAX_START_LOAD="${ABSANTE_MAX_START_LOAD:-3}"
-HIGH="${ABSANTE_LOAD_HIGH:-5}"
-LOW="${ABSANTE_LOAD_LOW:-3}"
+HIGH="${ABSANTE_LOAD_HIGH:-4}"
+LOW="${ABSANTE_LOAD_LOW:-2}"
 MIN_PRATICIENS="${ABSANTE_MIN_PRATICIENS:-1000000}"
 
 log() { echo "$(date '+%F %T') $*"; }
@@ -63,19 +65,22 @@ psql_ -c "DROP SCHEMA IF EXISTS rpps_next CASCADE" >/dev/null || exit 1
 
 log "restauration dans le schéma rpps_next (1 processus, sans parallélisme)"
 nice -n 10 docker exec \
-  -e PGOPTIONS="-c synchronous_commit=off -c max_parallel_maintenance_workers=0 -c max_parallel_workers_per_gather=0 -c maintenance_work_mem=64MB" \
+  -e PGOPTIONS="-c synchronous_commit=off -c max_parallel_maintenance_workers=0 -c max_parallel_workers_per_gather=0 -c maintenance_work_mem=64MB -c backend_flush_after=256kB" \
   "$CONTAINER" pg_restore -U absante -d absante --no-owner -j 1 /tmp/rpps.dump &
 restore_pid=$!
 
 # Garde-fou de charge : lancé APRÈS le démarrage de pg_restore (un `docker exec` sur une base déjà
 # en pause échoue). Il ne garde pas le descripteur du verrou (9>&-), sinon le verrou survivrait au script.
 sleep 5
+echo 0 > "$WORK/peak"
 (
-  paused=0
+  peak=0
   while :; do
     cur="$(load)"
-    if [ "$paused" = 0 ] && [ "$cur" -ge "$HIGH" ]; then docker pause "$CONTAINER" >/dev/null 2>&1 && paused=1
-    elif [ "$paused" = 1 ] && [ "$cur" -le "$LOW" ]; then docker unpause "$CONTAINER" >/dev/null 2>&1 && paused=0; fi
+    [ "$cur" -gt "$peak" ] && { peak="$cur"; echo "$peak" > "$WORK/peak"; }
+    is_paused="$(docker inspect -f '{{.State.Paused}}' "$CONTAINER" 2>/dev/null)"
+    if [ "$is_paused" = "false" ] && [ "$cur" -ge "$HIGH" ]; then docker pause "$CONTAINER" >/dev/null 2>&1
+    elif [ "$is_paused" = "true" ] && [ "$cur" -le "$LOW" ]; then docker unpause "$CONTAINER" >/dev/null 2>&1; fi
     sleep 1
   done
 ) 9>&- &
@@ -122,4 +127,4 @@ if [ "$still_next" != "0" ] || [ "$now" != "$n" ]; then
 fi
 psql_ -c "DROP SCHEMA IF EXISTS rpps_old CASCADE" >/dev/null
 echo "$sha" > "$STATE"
-log "OK : base mise à jour ($n praticiens, $sha)"
+log "OK : base mise à jour ($n praticiens, $sha) — pic de charge observé : $(cat "$WORK/peak" 2>/dev/null || echo ?) (le watchdog du Pi redémarre au-dessus de 10)"
