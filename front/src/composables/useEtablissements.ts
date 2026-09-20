@@ -6,6 +6,8 @@ export interface Praticien {
   profession: string
   /** Identifiant national RPPS : clé de la fiche détaillée (`/praticien/:id`, servie par l'API). */
   id: string
+  /** Indices de ses spécialités (voir `specialites` dans rpps-departement.json), s'il en a. */
+  specialites?: number[]
 }
 
 export interface Etablissement {
@@ -17,8 +19,9 @@ export interface Etablissement {
   praticiens: Praticien[]
 }
 
-// [nom établissement, [lat, lon] | null, [[nom, prénom, profession, identifiant national], ...]]
-type EtablissementRow = [string, [number, number] | null, [string, string, string, string][]]
+// [nom établissement, [lat, lon] | null, [[nom, prénom, profession, identifiant national, [indices de spécialités]?], ...]]
+type PraticienRow = [string, string, string, string, number[]?]
+type EtablissementRow = [string, [number, number] | null, PraticienRow[]]
 
 interface DeptPayload {
   updatedAt: string
@@ -53,19 +56,27 @@ export function useEtablissements() {
   /** `profession` : si fournie (et différente de "Tous"), ne garde que les établissements
    *  ayant au moins un praticien de cette profession, et ne liste que ces praticiens-là
    *  (chaque praticien a sa propre profession dans les données -> plus besoin de se limiter
-   *  à "Tous" comme avant, quand seul un total agrégé toutes professions était connu). */
-  function forCommune(dept: string, codeInsee: string, profession?: string): Etablissement[] {
+   *  à "Tous" comme avant, quand seul un total agrégé toutes professions était connu).
+   *  `specialiteIdx` : idem pour une spécialité (indice dans `specialites`). */
+  function forCommune(dept: string, codeInsee: string, profession?: string, specialiteIdx?: number | null): Etablissement[] {
     const rows = byDept.value[dept]?.communes[codeInsee]
     if (!rows) return []
     const etabs = rows.map(([nom, coords, praticiens]) => ({
       nom,
       coords,
-      praticiens: praticiens.map(([nomP, prenom, prof, id]) => ({ nom: nomP, prenom, profession: prof, id })),
+      praticiens: praticiens.map(([nomP, prenom, prof, id, specialites]) => ({
+        nom: nomP,
+        prenom,
+        profession: prof,
+        id,
+        ...(specialites ? { specialites } : {}),
+      })),
     }))
-    if (!profession || profession === 'Tous') return etabs
-    return etabs
-      .map((e) => ({ ...e, praticiens: e.praticiens.filter((p) => p.profession === profession) }))
-      .filter((e) => e.praticiens.length > 0)
+    const keep = (p: Praticien) =>
+      (!profession || profession === 'Tous' || p.profession === profession) &&
+      (specialiteIdx == null || (p.specialites?.includes(specialiteIdx) ?? false))
+    if ((!profession || profession === 'Tous') && specialiteIdx == null) return etabs
+    return etabs.map((e) => ({ ...e, praticiens: e.praticiens.filter(keep) })).filter((e) => e.praticiens.length > 0)
   }
 
   return { loading, loadDept, forCommune }

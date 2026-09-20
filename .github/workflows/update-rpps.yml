@@ -40,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add front/public/data/rpps-departement.json front/public/data/rpps-commune.json front/public/data/etablissements/ front/public/data/etablissements-geo.json
+          git add front/public/data/rpps-departement.json front/public/data/rpps-commune.json front/public/data/rpps-commune-specialite.json front/public/data/etablissements/ front/public/data/etablissements-geo.json
           if git diff --staged --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else

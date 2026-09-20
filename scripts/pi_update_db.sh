@@ -126,5 +126,12 @@ if [ "$still_next" != "0" ] || [ "$now" != "$n" ]; then
   exit 1
 fi
 psql_ -c "DROP SCHEMA IF EXISTS rpps_old CASCADE" >/dev/null
+# Historique : un instantané des effectifs par mois, dans le schéma `historique` que la bascule ne
+# touche jamais. Secondaire : un échec est signalé mais n'annule pas la mise à jour, qui est faite.
+if psql_ -f - < "$(dirname "$0")/history_upsert.sql" >/dev/null; then
+  log "historique des effectifs à jour"
+else
+  log "AVERTISSEMENT : historique des effectifs non mis à jour (le dump ne contient peut-être pas encore effectifs_snapshot)"
+fi
 echo "$sha" > "$STATE"
 log "OK : base mise à jour ($n praticiens, $sha) — pic de charge observé : $(cat "$WORK/peak" 2>/dev/null || echo ?) (le watchdog du Pi redémarre au-dessus de 10)"

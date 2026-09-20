@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { interpolateBlues } from 'd3-scale-chromatic'
+import { formatNombre } from '../../utils/format'
 
 const props = defineProps<{
   max: number
   label: string
+  /** L'échelle s'arrête à `max` : les valeurs au-delà ont la couleur la plus foncée (« ≥ max »). */
+  capped?: boolean
 }>()
 
 const gradient = computed(() => {
@@ -19,7 +22,7 @@ const gradient = computed(() => {
     <div class="color-legend__bar" :style="{ background: gradient }" />
     <div class="color-legend__ticks">
       <span>0</span>
-      <span>{{ props.max.toLocaleString('fr-FR') }}</span>
+      <span>{{ props.capped ? '≥ ' : '' }}{{ formatNombre(props.max) }}</span>
     </div>
   </div>
 </template>

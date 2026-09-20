@@ -9,8 +9,9 @@ import { rgb } from 'd3-color'
  * interne est plus strict qu'un moteur CSS complet ; le hexadécimal est le
  * format le plus sûr, sans ambiguïté possible.
  */
-export function createColorScale(values: number[]) {
-  const max = Math.max(...values, 1)
-  const scale = scaleSequential(interpolateBlues).domain([0, max])
+export function createColorScale(values: number[], max?: number) {
+  // `max` explicite (échelle plafonnée) : les valeurs au-delà prennent la couleur la plus foncée.
+  const domainMax = max && max > 0 ? max : Math.max(...values, 1)
+  const scale = scaleSequential(interpolateBlues).domain([0, domainMax]).clamp(true)
   return (value: number) => rgb(scale(value)).formatHex()
 }

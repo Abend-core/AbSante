@@ -3,9 +3,9 @@ import { mount } from '@vue/test-utils'
 import CitySearch from './CitySearch.vue'
 
 const COMMUNES = [
-  { nom: 'Bourges', lat: 47.08, lon: 2.4, dept: '18', total: 2407 },
-  { nom: 'Châteauroux', lat: 46.81, lon: 1.69, dept: '36', total: 1200 },
-  { nom: 'Paris', lat: 48.85, lon: 2.35, dept: '75', total: 40000 },
+  { codeInsee: '18033', nom: 'Bourges', lat: 47.08, lon: 2.4, dept: '18', total: 2407 },
+  { codeInsee: '36044', nom: 'Châteauroux', lat: 46.81, lon: 1.69, dept: '36', total: 1200 },
+  { codeInsee: '75056', nom: 'Paris', lat: 48.85, lon: 2.35, dept: '75', total: 40000 },
 ]
 
 describe('CitySearch', () => {
@@ -32,7 +32,7 @@ describe('CitySearch', () => {
     ["l'aigle", "L'Aigle"],
   ])('tape « %s » -> trouve « %s » (espaces, tirets et apostrophes équivalents)', async (typed, expected) => {
     const wrapper = mount(CitySearch, {
-      props: { communes: [...COMMUNES, { nom: 'La Tour-de-Salvagny', dept: '69', lat: 45.8, lon: 4.7, total: 500 }, { nom: "L'Aigle", dept: '61', lat: 48.7, lon: 0.6, total: 100 }] },
+      props: { communes: [...COMMUNES, { codeInsee: '69250', nom: 'La Tour-de-Salvagny', dept: '69', lat: 45.8, lon: 4.7, total: 500 }, { codeInsee: '61001', nom: "L'Aigle", dept: '61', lat: 48.7, lon: 0.6, total: 100 }] },
     })
     await wrapper.find('input').setValue(typed)
     await wrapper.find('input').trigger('focus')

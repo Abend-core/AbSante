@@ -2,11 +2,16 @@ import type pg from 'pg'
 import { SCHEMA_PATTERN } from '../config.js'
 import { mapFiche } from './mapper.js'
 import type { ActiviteRow, DiplomeRow, PraticienRow, SavoirFaireRow } from './mapper.js'
+import { RECHERCHE_LIMITE, RECHERCHE_MIN_CARACTERES, normalizeQuery, toTsQuery } from './recherche.js'
+import type { Recherche, ResultatRecherche } from './recherche.js'
 import type { Fiche } from './types.js'
 
 export interface PraticienRepository {
   /** `null` si aucun praticien n'a cet identifiant. */
   findFiche(id: string): Promise<Fiche | null>
+  /** Praticiens dont « nom prénom » commence par chaque mot de `texte`, dans n'importe quel ordre.
+   *  Vide si le texte est trop court pour être une recherche utile. */
+  rechercher(texte: string): Promise<Recherche>
   /** Lève `RepositoryUnavailableError` si la base ne répond pas. */
   ping(): Promise<void>
 }
@@ -51,6 +56,20 @@ async function guarded<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+interface PersonneRow {
+  id_national: string
+  civilite_exercice: string | null
+  nom: string | null
+  prenom: string | null
+}
+
+interface LieuRow {
+  id_national: string
+  professions: string[] | null
+  commune: string | null
+  code_postal: string | null
+}
+
 export class PgPraticienRepository implements PraticienRepository {
   private readonly pool: pg.Pool
   private readonly schema: string
@@ -65,6 +84,51 @@ export class PgPraticienRepository implements PraticienRepository {
 
   async ping(): Promise<void> {
     await guarded(() => this.pool.query('SELECT 1'))
+  }
+
+  async rechercher(texte: string): Promise<Recherche> {
+    const mots = normalizeQuery(texte)
+    if (mots.join('').length < RECHERCHE_MIN_CARACTERES) return { resultats: [], tronque: false }
+    return guarded(async () => {
+      const s = this.schema
+      // Une ligne de plus que la limite : c'est ainsi qu'on sait qu'il y en avait d'autres.
+      const trouves = await this.pool.query<PersonneRow>(
+        `SELECT id_national, civilite_exercice, nom, prenom
+           FROM ${s}.praticiens
+          WHERE recherche @@ to_tsquery('simple', $1)
+          ORDER BY nom, prenom, id_national
+          LIMIT $2`,
+        [toTsQuery(mots), RECHERCHE_LIMITE + 1],
+      )
+      const personnes = trouves.rows.slice(0, RECHERCHE_LIMITE)
+      if (personnes.length === 0) return { resultats: [], tronque: false }
+
+      const lieux = await this.pool.query<LieuRow>(
+        `SELECT a.id_national,
+                array_agg(DISTINCT a.profession) FILTER (WHERE a.profession IS NOT NULL) AS professions,
+                (array_agg(st.commune ORDER BY a.id) FILTER (WHERE st.commune IS NOT NULL))[1] AS commune,
+                (array_agg(st.code_postal ORDER BY a.id) FILTER (WHERE st.commune IS NOT NULL))[1] AS code_postal
+           FROM ${s}.activites a
+           LEFT JOIN ${s}.structures st ON st.cle = a.structure_cle
+          WHERE a.id_national = ANY($1)
+          GROUP BY a.id_national`,
+        [personnes.map((p) => p.id_national)],
+      )
+      const lieuParId = new Map(lieux.rows.map((l) => [l.id_national, l]))
+      const resultats: ResultatRecherche[] = personnes.map((p) => {
+        const lieu = lieuParId.get(p.id_national)
+        return {
+          id: p.id_national,
+          civiliteExercice: p.civilite_exercice,
+          nom: p.nom,
+          prenom: p.prenom,
+          professions: lieu?.professions ?? [],
+          commune: lieu?.commune ?? null,
+          codePostal: lieu?.code_postal ?? null,
+        }
+      })
+      return { resultats, tronque: trouves.rows.length > RECHERCHE_LIMITE }
+    })
   }
 
   async findFiche(id: string): Promise<Fiche | null> {

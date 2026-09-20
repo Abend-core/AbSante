@@ -12,4 +12,16 @@ describe('createColorScale', () => {
     const scale = createColorScale([0, 100])
     expect(scale(0)).not.toBe(scale(100))
   })
+
+  it('avec un maximum explicite, les valeurs au-delà prennent la couleur la plus foncée (pas de dépassement)', () => {
+    const scale = createColorScale([0, 50, 5000], 100)
+    expect(scale(100)).toBe(scale(5000))
+    expect(scale(50)).not.toBe(scale(100))
+  })
+
+  it('accepte un maximum inférieur à 1 (densité d\'une profession rare)', () => {
+    const scale = createColorScale([0, 0.2], 0.2)
+    expect(scale(0.1)).not.toBe(scale(0.2))
+    expect(scale(0.1)).not.toBe(scale(0))
+  })
 })

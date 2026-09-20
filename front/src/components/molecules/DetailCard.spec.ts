@@ -23,6 +23,14 @@ describe('DetailCard', () => {
     expect(wrapper.text()).not.toContain('Cliquez un point')
   })
 
+  it('affiche la densité pour 100 000 habitants quand elle est connue, et rien sinon', () => {
+    const avec = mount(DetailCard, { props: { detail: { nom: 'Cher', n: 4890, densite: 1623.4 }, unit: 'praticiens', hint: '' } })
+    expect(avec.text().replace(/\s+/g, ' ')).toContain('pour 100 000 hab.')
+    expect(avec.text().replace(/\s/g, '')).toContain('1623pour100000hab.')
+    const sans = mount(DetailCard, { props: { detail: { nom: 'Lyon', n: 42 }, unit: 'médecins', hint: '' } })
+    expect(sans.text()).not.toContain('100 000')
+  })
+
   it('affiche la liste des praticiens quand fournie', () => {
     const wrapper = mount(DetailCard, {
       props: {
