@@ -13,6 +13,7 @@ const FICHE: Fiche = {
 function fakeRepository(overrides: Partial<PraticienRepository> = {}): PraticienRepository {
   return {
     findFiche: vi.fn(async (id: string) => (id === FICHE.id ? FICHE : null)),
+    rechercher: vi.fn(async () => ({ resultats: [], tronque: false })),
     ping: vi.fn(async () => {}),
     ...overrides,
   }
@@ -78,6 +79,40 @@ describe('GET /api/praticiens/:id', () => {
     expect(limited.statusCode).toBe(429)
     expect(limited.json().error.code).toBe('TROP_DE_REQUETES')
     expect((await app.inject('/health')).statusCode).toBe(200)
+  })
+})
+
+describe('GET /api/recherche', () => {
+  const RESULTAT = { id: '810006881261', civiliteExercice: null, nom: 'BRUN', prenom: 'SOLENNE', professions: ['Infirmier'], commune: 'Montpellier', codePostal: '34000' }
+
+  it('renvoie les résultats, sans mise en cache (la requête change à chaque frappe)', async () => {
+    const repository = fakeRepository({ rechercher: vi.fn(async () => ({ resultats: [RESULTAT], tronque: true })) })
+    app = await buildApp({ repository })
+    const res = await app.inject('/api/recherche?q=brun%20solenne')
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ resultats: [RESULTAT], tronque: true })
+    expect(res.headers['cache-control']).toBe('no-store')
+    expect(repository.rechercher).toHaveBeenCalledWith('brun solenne')
+  })
+
+  it.each(['', 'ab', ''.padEnd(81, 'a')])('refuse la recherche %j (trop courte ou trop longue) sans interroger la base', async (q) => {
+    const repository = fakeRepository()
+    app = await buildApp({ repository })
+    const res = await app.inject(`/api/recherche?q=${q}`)
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error.code).toBe('REQUETE_INVALIDE')
+    expect(repository.rechercher).not.toHaveBeenCalled()
+  })
+
+  it('refuse une requête sans paramètre q', async () => {
+    app = await buildApp({ repository: fakeRepository() })
+    expect((await app.inject('/api/recherche')).statusCode).toBe(400)
+  })
+
+  it('répond 503 quand la base est indisponible', async () => {
+    const repository = fakeRepository({ rechercher: vi.fn().mockRejectedValue(new RepositoryUnavailableError(new Error('down'))) })
+    app = await buildApp({ repository })
+    expect((await app.inject('/api/recherche?q=martin')).statusCode).toBe(503)
   })
 })
 

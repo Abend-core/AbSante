@@ -31,7 +31,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.setErrorHandler((err: Error & { statusCode?: number; validation?: unknown }, request, reply) => {
     reply.header('Cache-Control', 'no-store')
     if (err.validation) {
-      return reply.code(400).send(errorBody('REQUETE_INVALIDE', 'Identifiant de praticien invalide.'))
+      return reply.code(400).send(errorBody('REQUETE_INVALIDE', 'Requête invalide.'))
     }
     if (err.statusCode === 429) {
       return reply.code(429).send(errorBody('TROP_DE_REQUETES', 'Trop de requêtes, réessayez dans un instant.'))

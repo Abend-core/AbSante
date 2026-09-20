@@ -1,8 +1,11 @@
 """
 Met à jour les données RPPS servies par le front :
 - front/public/data/rpps-departement.json      : effectif par département x profession
+  et par département x spécialité
 - front/public/data/rpps-commune.json          : effectif par commune x profession, avec
   coordonnées, pour les points sur la carte
+- front/public/data/rpps-commune-specialite.json : effectif par commune x spécialité (fichier
+  creux, chargé seulement quand une spécialité est choisie)
 - front/public/data/etablissements/{dept}.json : un fichier par département, chargé à la
   demande (voir useEtablissements.ts) quand on zoome dessus -> pour chaque commune, la
   liste COMPLETE de ses établissements avec le nom/prénom/profession de chaque praticien
@@ -25,10 +28,13 @@ import pandas as pd
 
 RPPS_URL = "https://www.data.gouv.fr/api/1/datasets/r/fffda7e9-0ea2-4c35-bba0-4496f3af935d"
 COMMUNES_URL = "https://www.data.gouv.fr/api/1/datasets/r/27ee86f2-81d5-47a2-a558-a506b5fe3616"
+SAVOIR_FAIRE_URL = "https://www.data.gouv.fr/api/1/datasets/r/fb55f15f-bd61-4402-b551-51ef387f2fab"
 RAW_PATH = "PS_LibreAcces_Personne_activite.txt"
 COMMUNES_PATH = "communes_coords.csv"
+SAVOIR_FAIRE_PATH = "PS_LibreAcces_SavoirFaire.txt"
 OUT_DEPT = "front/public/data/rpps-departement.json"
 OUT_COMMUNE = "front/public/data/rpps-commune.json"
+OUT_COMMUNE_SPEC = "front/public/data/rpps-commune-specialite.json"
 OUT_ETABS_DIR = "front/public/data/etablissements"
 
 OUT_GEO_CACHE = "front/public/data/etablissements-geo.json"
@@ -45,6 +51,31 @@ USECOLS = [
     "Identifiant technique de la structure",
 ]
 
+# Seule la « Spécialité ordinale » est retenue (98 libellés, 3 professions : médecins, chirurgiens-
+# dentistes, infirmiers en pratique avancée). Les autres types du fichier (capacités, compétences,
+# DESC...) sont des compléments qui ne désignent pas ce que fait le praticien au quotidien.
+TYPE_SPECIALITE = "Spécialité ordinale"
+
+# Le RPPS a plusieurs libellés pour une même spécialité (anciennes et nouvelles maquettes de
+# formation) : sans regroupement, « médecin généraliste » se répartirait sur trois entrées.
+# Clé : (profession, libellé du fichier) ; valeur : libellé affiché. Tout ce qui n'est pas listé
+# ici garde son libellé du fichier.
+SPECIALITE_ALIAS = {
+    ("Médecin", "Spécialiste en Médecine Générale"): "Médecine générale",
+    ("Médecin", "Qualifié en Médecine Générale"): "Médecine générale",
+    ("Médecin", "Médecine Générale"): "Médecine générale",
+    ("Médecin", "O.R.L et chirurgie cervico faciale"): "Oto-rhino-laryngologie",
+    ("Médecin", "Psychiatrie option enfant & adolescent"): "Psychiatrie option enfant et adolescent",
+    ("Médecin", "Endocrinologie et métabolisme"): "Endocrinologie, diabétologie, nutrition",
+    ("Médecin", "Hématologie (option Maladie du sang)"): "Hématologie",
+    ("Médecin", "Hématologie (réforme 2017)"): "Hématologie",
+    ("Médecin", "Chirurgie maxillo-faciale (réforme 2017)"): "Chirurgie maxillo-faciale",
+    ("Médecin", "Radio-thérapie"): "Oncologie option radiothérapie",
+    ("Médecin", "Gynéco-obstétrique et Gynéco médicale option Gynéco-obst"): "Gynécologie-obstétrique",
+    ("Médecin", "Gynéco-obstétrique et Gynéco médicale option Gynéco-médicale"): "Gynécologie médicale",
+    ("Médecin", "CHIRURGIE ORALE"): "Chirurgie orale",
+}
+
 
 def extraire_dept(code: pd.Series, n_metropole: int = 2) -> pd.Series:
     """Département depuis un code postal ou commune INSEE.
@@ -53,6 +84,34 @@ def extraire_dept(code: pd.Series, n_metropole: int = 2) -> pd.Series:
     dept = code.str[:n_metropole].copy()
     dept[is_om] = code[is_om].str[:3]
     return dept
+
+
+def charger_specialites(path: str):
+    """Spécialités ordinales par praticien.
+
+    Renvoie (specialites, table) : `specialites` est la liste [profession, libellé] triée, dont
+    l'indice sert de code court dans les JSON du front ; `table` associe chaque (identifiant PP,
+    profession) à ses indices. Une même personne peut avoir plusieurs spécialités."""
+    sf = pd.read_csv(
+        path,
+        sep="|",
+        usecols=["Identifiant PP", "Identification nationale PP", "Libellé profession", "Libellé type savoir-faire", "Libellé savoir-faire"],
+        dtype=str,
+    )
+    sf = sf[sf["Libellé type savoir-faire"] == TYPE_SPECIALITE].dropna(
+        subset=["Identifiant PP", "Libellé profession", "Libellé savoir-faire"]
+    )
+    sf["specialite"] = [
+        SPECIALITE_ALIAS.get((prof, lib.strip()), lib.strip())
+        for prof, lib in zip(sf["Libellé profession"], sf["Libellé savoir-faire"])
+    ]
+    sf = sf.drop_duplicates(subset=["Identifiant PP", "Libellé profession", "specialite"])
+    specialites = sorted(
+        sf[["Libellé profession", "specialite"]].drop_duplicates().itertuples(index=False, name=None)
+    )
+    index = {pair: i for i, pair in enumerate(specialites)}
+    sf["spec_idx"] = [index[pair] for pair in zip(sf["Libellé profession"], sf["specialite"])]
+    return [list(pair) for pair in specialites], sf
 
 
 def main():
@@ -64,13 +123,15 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.offline and os.path.exists(RAW_PATH) and os.path.exists(COMMUNES_PATH):
+    if args.offline and all(os.path.exists(p) for p in (RAW_PATH, COMMUNES_PATH, SAVOIR_FAIRE_PATH)):
         print("--offline : réutilisation des fichiers sources déjà présents")
     else:
         print(f"Téléchargement de {RPPS_URL} ...")
         urllib.request.urlretrieve(RPPS_URL, RAW_PATH)
         print(f"Téléchargement de {COMMUNES_URL} ...")
         urllib.request.urlretrieve(COMMUNES_URL, COMMUNES_PATH)
+        print(f"Téléchargement de {SAVOIR_FAIRE_URL} ...")
+        urllib.request.urlretrieve(SAVOIR_FAIRE_URL, SAVOIR_FAIRE_PATH)
 
     df = pd.read_csv(RAW_PATH, sep="|", usecols=USECOLS, dtype=str)
     print(f"{len(df)} lignes chargées")
@@ -94,6 +155,9 @@ def main():
     df["Nom d'exercice"] = df["Nom d'exercice"].fillna("")
     df["Prénom d'exercice"] = df["Prénom d'exercice"].fillna("")
 
+    specialites, spec = charger_specialites(SAVOIR_FAIRE_PATH)
+    print(f"{len(specialites)} spécialités, {len(spec)} couples praticien x spécialité")
+
     professions = sorted(df["Libellé profession"].unique().tolist())
     cats = professions + ["Tous"]
     updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -108,9 +172,28 @@ def main():
     pivot["Tous"] = dedup_total.groupby("dept").size()
 
     by_departement = {d: {c: int(row[c]) for c in cats} for d, row in pivot.iterrows()}
+
+    # Praticien x spécialité rattaché à ses lieux d'exercice : on joint sur (identifiant, profession)
+    # pour qu'un médecin qui est aussi pharmacien ne compte que dans les spécialités de son activité
+    # de médecin. Personne comptée une fois par département et par spécialité.
+    act_spec = df[["Identifiant PP", "Libellé profession", "dept", "code_insee"]].drop_duplicates().merge(
+        spec[["Identifiant PP", "Libellé profession", "spec_idx"]], on=["Identifiant PP", "Libellé profession"]
+    )
+    par_dept_spec = act_spec.drop_duplicates(subset=["Identifiant PP", "dept", "spec_idx"]).groupby(["dept", "spec_idx"]).size()
+    by_specialite: dict[str, dict[str, int]] = {}
+    for (d, idx), n in par_dept_spec.items():
+        by_specialite.setdefault(d, {})[str(idx)] = int(n)
+
     with open(OUT_DEPT, "w", encoding="utf-8") as f:
         json.dump(
-            {"updatedAt": updated_at, "professions": professions, "byDepartement": by_departement},
+            {
+                "updatedAt": updated_at,
+                "professions": professions,
+                # [profession, libellé] ; l'indice est la clé de bySpecialite et des fichiers commune/établissement
+                "specialites": specialites,
+                "byDepartement": by_departement,
+                "bySpecialite": by_specialite,
+            },
             f, ensure_ascii=False, indent=2, sort_keys=True,
         )
     print(f"{len(by_departement)} départements -> {OUT_DEPT}")
@@ -153,6 +236,23 @@ def main():
         )
     print(f"{len(rows)} communes -> {OUT_COMMUNE}")
 
+    # Effectifs par commune x spécialité : fichier creux (la plupart des communes n'ont que
+    # quelques spécialités), séparé du fichier principal pour ne se charger que sur demande.
+    coord_communes = set(merged["code_insee"])
+    par_commune_spec = (
+        act_spec.dropna(subset=["code_insee"])
+        .drop_duplicates(subset=["Identifiant PP", "code_insee", "spec_idx"])
+        .groupby(["code_insee", "spec_idx"])
+        .size()
+    )
+    communes_spec: dict[str, list[list[int]]] = {}
+    for (code, idx), n in par_commune_spec.items():
+        if code in coord_communes:
+            communes_spec.setdefault(code, []).append([int(idx), int(n)])
+    with open(OUT_COMMUNE_SPEC, "w", encoding="utf-8") as f:
+        json.dump({"updatedAt": updated_at, "communes": communes_spec}, f, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    print(f"{len(communes_spec)} communes avec spécialité -> {OUT_COMMUNE_SPEC}")
+
     # --- Établissements détaillés, un fichier PAR DÉPARTEMENT (chargé à la demande) ---
     # Avant : seulement le top 3 établissements par commune (nom + effectif agrégé) était
     # embarqué dans rpps-commune.json -> un petit cabinet individuel (ex: 1 seul médecin)
@@ -180,22 +280,30 @@ def main():
     etabs_dedup = etabs_df.drop_duplicates(
         subset=["Identifiant PP", "code_insee", "Identifiant technique de la structure", "Libellé profession"]
     )
+    specs_par_praticien: dict[tuple[str, str], list[int]] = {}
+    for pp, prof, idx in zip(spec["Identifiant PP"], spec["Libellé profession"], spec["spec_idx"]):
+        specs_par_praticien.setdefault((pp, prof), []).append(int(idx))
     n_dept_files = 0
     for dept, dept_group in etabs_dedup.groupby("dept"):
         communes_out: dict[str, list] = {}
         for code_insee, commune_group in dept_group.groupby("code_insee"):
             etabs_out = []
             for structure_id, etab_group in commune_group.groupby("Identifiant technique de la structure"):
-                praticiens = [
-                    [
+                praticiens = []
+                for _, r in etab_group.iterrows():
+                    praticien = [
                         r["Nom d'exercice"],
                         r["Prénom d'exercice"],
                         r["Libellé profession"],
                         # Clé de la fiche détaillée (API) : identifiant national, type inclus
                         r["Identification nationale PP"],
                     ]
-                    for _, r in etab_group.iterrows()
-                ]
+                    # Indices de ses spécialités (voir "specialites" dans rpps-departement.json) :
+                    # ajoutés seulement s'il y en a, pour ne pas alourdir les fichiers pour rien.
+                    idx = specs_par_praticien.get((r["Identifiant PP"], r["Libellé profession"]))
+                    if idx:
+                        praticien.append(sorted(idx))
+                    praticiens.append(praticien)
                 raison_sociale = etab_group["Raison sociale site"].iloc[0]
                 coords = geo_cache.get(structure_id)
                 etabs_out.append([raison_sociale, coords, praticiens])

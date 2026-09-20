@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useFranceGeo } from '../../composables/useFranceGeo'
 import { useFranceRppsStats, type CommuneOption } from '../../composables/useFranceRppsStats'
 import { useEtablissements, type Praticien, type Etablissement } from '../../composables/useEtablissements'
+import { findNearby, type NearbyResult } from '../../composables/useNearby'
+import type { LatLon } from '../../utils/geo'
 import { createColorScale } from '../../composables/useColorScale'
 import ColorLegend from '../molecules/ColorLegend.vue'
 import ProfessionSelect from '../molecules/ProfessionSelect.vue'
+import SpecialiteSelect from '../molecules/SpecialiteSelect.vue'
+import PraticienSearch from '../molecules/PraticienSearch.vue'
+import NearbyPanel, { type NearbyStatus } from '../molecules/NearbyPanel.vue'
 import DetailCard from '../molecules/DetailCard.vue'
 import CitySearch from '../molecules/CitySearch.vue'
 import ToggleSwitch from '../atoms/ToggleSwitch.vue'
+import ActionButton from '../atoms/ActionButton.vue'
 import DataFreshness from '../atoms/DataFreshness.vue'
 import type { GeoFeature } from '../../types/geo'
 
@@ -26,7 +32,21 @@ const selectedPoint = ref<{
   praticiens?: Praticien[]
   etablissements?: Etablissement[]
 } | null>(null)
-const selectedDept = ref<{ nom: string; n: number } | null>(null)
+/** Département dont on affiche le détail : seulement son nom et son code, les chiffres sont
+ *  calculés à l'affichage (`deptDetail`) pour suivre la profession, la spécialité et le mode choisis. */
+const selectedDept = ref<{ nom: string; code: string } | null>(null)
+const deptDetail = computed(() => {
+  if (!selectedDept.value) return null
+  const { nom, code } = selectedDept.value
+  return {
+    nom,
+    n: stats.byDepartement.value[code] ?? 0,
+    densite: stats.densiteDisponible.value ? stats.densites.value[code] : undefined,
+  }
+})
+
+const nearbyStatus = ref<NearbyStatus>('idle')
+const nearbyResults = ref<NearbyResult[]>([])
 
 /** Taille FIXE des points commune/établissement : la taille ne code plus une
  *  grandeur (retiré, imprécis visuellement) — la densité de points suffit à
@@ -44,6 +64,9 @@ const REPERE_PANE = 'repere'
 let map: L.Map | null = null
 let polygonsLayer: L.GeoJSON | null = null
 let pointsLayer: L.LayerGroup | null = null
+let nearbyLayer: L.LayerGroup | null = null
+let nearbyOrigin: LatLon | null = null
+let nearbyRun = 0
 let cityHighlight: L.CircleMarker | null = null
 let resetButton: HTMLButtonElement | null = null
 let colorScale = createColorScale([1])
@@ -100,7 +123,7 @@ function goBack() {
 }
 
 function valueFor(feature: GeoFeature): number {
-  return stats.byDepartement.value[feature.properties.code] ?? 0
+  return stats.valeurs.value[feature.properties.code] ?? 0
 }
 
 /** Niveau de zoom "ville" adapté à sa taille (proxy : effectif total "Tous" de
@@ -233,7 +256,7 @@ function initMap() {
           viewStack = []
           pushView()
           selectedPoint.value = null
-          selectedDept.value = { nom: f.properties.nom, n: valueFor(f) }
+          selectedDept.value = { nom: f.properties.nom, code: f.properties.code }
           clearCityHighlight()
           map?.fitBounds((layer as L.Polygon).getBounds(), { padding: [20, 20] })
           stats.zoomedDept.value = f.properties.code
@@ -260,6 +283,7 @@ function initMap() {
 
   pointsLayer = L.layerGroup()
   if (showEtablissements.value) pointsLayer.addTo(map)
+  nearbyLayer = L.layerGroup().addTo(map)
 
   refreshData()
 }
@@ -292,7 +316,7 @@ function showEtablissement(etab: Etablissement, communeNom: string, communeLat: 
 function refreshData() {
   if (!polygonsLayer || !pointsLayer) return
 
-  colorScale = createColorScale(currentFeatures.value.map(valueFor))
+  colorScale = createColorScale(currentFeatures.value.map(valueFor), stats.maxValeur.value)
   polygonsLayer.setStyle(baseStyle)
 
   const dept = stats.zoomedDept.value
@@ -310,7 +334,7 @@ function refreshData() {
     // établissements ET leurs praticiens listés par la profession sélectionnée, pas
     // seulement se limiter à "Tous" comme avant (l'ancienne limite qui collapsait tout
     // sur un seul point dès qu'un filtre de profession était actif).
-    const etabs = etablissements.forCommune(dept, p.codeInsee, stats.selectedProfession.value)
+    const etabs = etablissements.forCommune(dept, p.codeInsee, stats.selectedProfession.value, stats.selectedSpecialiteIdx.value)
     const geocoded = etabs.filter((e) => e.coords)
     const ungeocoded = etabs.filter((e) => !e.coords)
 
@@ -354,12 +378,79 @@ function onSelectEtablissement(etab: Etablissement) {
 }
 
 function resetZoom() {
+  closeNearby()
   viewStack = []
   map?.setView(FRANCE_CENTER, FRANCE_ZOOM)
   stats.zoomedDept.value = null
   clearCityHighlight()
   selectedPoint.value = null
   selectedDept.value = null
+}
+
+/** « Autour de moi » : localise le visiteur puis cherche les établissements les plus proches qui
+ *  correspondent à la sélection (profession, spécialité). La position n'est jamais envoyée
+ *  nulle part : tout se calcule ici, à partir des fichiers de données déjà servis. */
+function locateMe() {
+  if (!('geolocation' in navigator)) {
+    nearbyStatus.value = 'unsupported'
+    return
+  }
+  nearbyStatus.value = 'locating'
+  nearbyResults.value = []
+  navigator.geolocation.getCurrentPosition(
+    (pos) => void searchNearby([pos.coords.latitude, pos.coords.longitude]),
+    (err) => {
+      nearbyStatus.value = err.code === err.PERMISSION_DENIED ? 'denied' : 'error'
+    },
+    { timeout: 10_000, maximumAge: 60_000 },
+  )
+}
+
+async function searchNearby(origin: LatLon) {
+  const run = ++nearbyRun
+  nearbyOrigin = origin
+  nearbyStatus.value = 'searching'
+  try {
+    const results = await findNearby(origin, {
+      communes: stats.allCommunes.value,
+      loadDept: etablissements.loadDept,
+      forCommune: (dept, code) => etablissements.forCommune(dept, code, stats.selectedProfession.value, stats.selectedSpecialiteIdx.value),
+    })
+    if (run !== nearbyRun) return // une recherche plus récente a pris le relais
+    nearbyResults.value = results
+    nearbyStatus.value = 'done'
+    drawNearby(origin, results)
+  } catch {
+    if (run === nearbyRun) nearbyStatus.value = 'error'
+  }
+}
+
+function drawNearby(origin: LatLon, results: NearbyResult[]) {
+  if (!map || !nearbyLayer) return
+  nearbyLayer.clearLayers()
+  const me = L.circleMarker(origin, { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1, pane: ETABLISSEMENTS_PANE })
+  me.bindTooltip('Vous êtes ici')
+  nearbyLayer.addLayer(me)
+  for (const r of results) {
+    const marker = makeMarker(r.position[0], r.position[1])
+    marker.on('click', () => onSelectNearby(r))
+    nearbyLayer.addLayer(marker)
+  }
+  // Cadre la personne et ses résultats ; sans résultat, se contente de la centrer.
+  if (results.length > 0) map.fitBounds([origin, ...results.map((r) => r.position)], { padding: [30, 30], maxZoom: 15 })
+  else map.setView(origin, 12)
+}
+
+function onSelectNearby(r: NearbyResult) {
+  showEtablissement(r.etablissement, r.commune.nom, r.commune.lat, r.commune.lon)
+}
+
+function closeNearby() {
+  nearbyRun++ // ignore une recherche encore en cours
+  nearbyOrigin = null
+  nearbyStatus.value = 'idle'
+  nearbyResults.value = []
+  nearbyLayer?.clearLayers()
 }
 
 /** Recherche de ville : zoome directement dessus, quel que soit le département
@@ -379,9 +470,16 @@ function selectCity(c: CommuneOption) {
   focusCity(c.lat, c.lon, cityZoomFor(c.total))
 }
 
+/** Unité des effectifs affichés : « praticiens », « infirmier », « praticiens en cardiologie »... */
 function professionLabel(): string {
+  if (stats.selectedSpecialite.value) return `praticiens en ${stats.selectedSpecialite.value.toLowerCase()}`
   return stats.selectedProfession.value === 'Tous' ? 'praticiens' : stats.selectedProfession.value.toLowerCase()
 }
+
+// Espaces insécables : « 100 000 » ne doit jamais se couper en fin de ligne.
+const legendLabel = computed(
+  () => `${stats.selectionLabel.value ?? 'Praticiens'} ${stats.modeDensite.value ? 'pour 100\u00a0000\u00a0habitants' : 'par département'}`,
+)
 
 function onKeydown(event: KeyboardEvent) {
   const tag = (event.target as HTMLElement | null)?.tagName
@@ -401,9 +499,18 @@ onMounted(async () => {
 // département, recherche de ville) -> refreshData() ré-affine ensuite les points
 // commune en points établissement une fois les données disponibles (loadDept ne
 // re-télécharge pas si déjà en cache).
-watch([() => stats.selectedProfession.value, () => stats.zoomedDept.value], async ([, dept]) => {
-  if (dept) await etablissements.loadDept(dept)
-  refreshData()
+// `stats.points` change quand la sélection change ET quand le fichier des communes par spécialité
+// arrive ; `stats.valeurs` quand on bascule effectif / densité.
+watch(
+  [() => stats.selectedProfession.value, () => stats.selectedSpecialiteIdx.value, () => stats.zoomedDept.value, stats.points, stats.valeurs],
+  async ([, , dept]) => {
+    if (dept) await etablissements.loadDept(dept)
+    refreshData()
+  },
+)
+// « Autour de moi » suit la sélection : changer de profession relance la recherche depuis la même position.
+watch([() => stats.selectedProfession.value, () => stats.selectedSpecialiteIdx.value], () => {
+  if (nearbyOrigin && nearbyStatus.value !== 'idle') void searchNearby(nearbyOrigin)
 })
 watch(showEtablissements, (visible) => {
   if (!map || !pointsLayer) return
@@ -424,11 +531,31 @@ onBeforeUnmount(() => {
   <div class="leaflet-map">
     <div class="controls">
       <CitySearch :communes="stats.allCommunes.value" @select="selectCity" />
+      <PraticienSearch />
+      <ActionButton
+        variant="outline"
+        icon="pin"
+        :disabled="nearbyStatus === 'locating' || nearbyStatus === 'searching'"
+        title="Les établissements les plus proches de vous (votre position reste sur votre appareil)"
+        @click="locateMe"
+      >
+        Autour de moi
+      </ActionButton>
+    </div>
+    <div class="controls">
       <ProfessionSelect v-model="stats.selectedProfession.value" :professions="stats.professions.value" />
-      <ColorLegend
-        :max="stats.maxValue.value"
-        :label="`${stats.selectedProfession.value === 'Tous' ? 'Praticiens' : stats.selectedProfession.value} par département`"
+      <SpecialiteSelect
+        v-if="stats.specialitesDeLaProfession.value.length"
+        v-model="stats.selectedSpecialite.value"
+        :specialites="stats.specialitesDeLaProfession.value"
       />
+      <ToggleSwitch
+        v-if="stats.densiteDisponible.value"
+        v-model="stats.densite.value"
+        label="Pour 100 000 hab."
+        title="Colorier par praticiens pour 100 000 habitants plutôt que par effectif brut (qui ne fait que suivre la population). Les praticiens sont comptés là où ils exercent : les départements à gros hôpitaux ressortent davantage."
+      />
+      <ColorLegend :max="stats.maxValeur.value" :label="legendLabel" :capped="stats.plafonne.value" />
       <ToggleSwitch
         v-model="showEtablissements"
         label="Établissements"
@@ -442,10 +569,18 @@ onBeforeUnmount(() => {
     <div v-show="!loading" ref="mapDiv" class="map-canvas" />
 
     <DetailCard
-      :detail="selectedPoint ?? selectedDept"
+      :detail="selectedPoint ?? deptDetail"
       :unit="professionLabel()"
       hint="Recherchez ou cliquez une ville ou un département pour voir le détail (Échap pour dézoomer)"
       @select-etablissement="onSelectEtablissement"
+    />
+
+    <NearbyPanel
+      :status="nearbyStatus"
+      :results="nearbyResults"
+      :label="stats.selectionLabel.value"
+      @select="onSelectNearby"
+      @close="closeNearby"
     />
   </div>
 </template>
@@ -457,6 +592,12 @@ onBeforeUnmount(() => {
   gap: 0.9rem 1.5rem;
   margin-bottom: 0.5rem;
   flex-wrap: wrap;
+}
+
+/* Le libellé de « Autour de moi » ne se coupe pas sur deux lignes ; on le grise pendant la recherche. */
+.controls button:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .map-canvas {

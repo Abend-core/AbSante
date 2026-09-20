@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { Praticien, Etablissement } from '../../composables/useEtablissements'
+import { formatNombre } from '../../utils/format'
 
 defineProps<{
-  detail: { nom: string; n: number; praticiens?: Praticien[]; etablissements?: Etablissement[] } | null
+  detail: { nom: string; n: number; densite?: number; praticiens?: Praticien[]; etablissements?: Etablissement[] } | null
   unit: string
   hint: string
 }>()
@@ -15,6 +16,9 @@ defineEmits<{ 'select-etablissement': [etablissement: Etablissement] }>()
       <div class="detail-card__header">
         <strong>{{ detail.nom }}</strong>
         <span>{{ detail.n }} {{ unit }}</span>
+        <span v-if="detail.densite !== undefined" class="detail-card__densite">
+          · {{ formatNombre(detail.densite) }} pour 100 000 hab.
+        </span>
       </div>
       <ul v-if="detail.praticiens?.length" class="detail-card__praticiens">
         <li v-for="p in detail.praticiens" :key="`${p.id}-${p.profession}`">
@@ -56,6 +60,11 @@ defineEmits<{ 'select-etablissement': [etablissement: Etablissement] }>()
   align-items: baseline;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.detail-card__densite {
+  color: var(--text);
+  font-size: 0.85rem;
 }
 
 .detail-card__hint {

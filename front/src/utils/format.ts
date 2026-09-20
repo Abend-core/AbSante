@@ -23,3 +23,15 @@ export function displayName(fiche: { civiliteExercice: string | null; civilite: 
   const parts = [fiche.civiliteExercice ?? fiche.civilite, fiche.prenom ? titleCase(fiche.prenom) : null, fiche.nom]
   return parts.filter((p): p is string => !!p).join(' ')
 }
+
+/** Nombre à la française : entier avec espace des milliers, une décimale seulement sous 10
+ *  (« 3,4 » pour 100 000 hab. compte, « 1 234 » n'a pas besoin de « ,57 »). */
+export function formatNombre(n: number): string {
+  return n >= 10 ? Math.round(n).toLocaleString('fr-FR') : n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })
+}
+
+/** « 840 m » sous 1 km, « 3,4 km » sous 10 km, « 12 km » au-delà. */
+export function formatDistance(km: number): string {
+  if (km < 1) return `${Math.round(km * 100) * 10} m`
+  return km < 10 ? `${km.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km` : `${Math.round(km)} km`
+}
