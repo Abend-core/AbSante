@@ -7,11 +7,16 @@ France, à partir du [RPPS](https://esante.gouv.fr/produits-services/repertoire-
 (Répertoire Partagé des Professionnels de Santé, data.gouv.fr).
 
 L'application permet de :
-- **rechercher un spécialiste par ville** (recherche de commune, filtre par profession) ;
-- **visualiser la densité** de professionnels de santé par département (carte
-  choroplèthe) ;
+- **rechercher un spécialiste par ville** (recherche de commune, filtre par profession, puis par
+  **spécialité** : cardiologie, pédiatrie...) ;
+- **trouver les établissements les plus proches de soi** (« Autour de moi ») ;
+- **retrouver un praticien par son nom** et ouvrir sa fiche ;
+- **visualiser la densité** de professionnels de santé par département (carte choroplèthe), en
+  **praticiens pour 100 000 habitants** ou en effectif brut ;
 - **voir la répartition** des établissements et de leurs praticiens (nom, prénom,
   profession), géocodés à leur vraie adresse.
+
+Aucune API n'est ouverte au public : `/api/praticiens/:id` et `/api/recherche` ne servent que le front.
 
 ## Stack
 
@@ -47,6 +52,43 @@ Commandes utiles (depuis `front/` ou `api/`) : `npm run lint`, `npm run typechec
 `npm run test:ci`, `npm run build`. Les tests de l'API s'exécutent contre un vrai Postgres
 (`docker compose up -d postgres`, ou `TEST_DATABASE_URL`).
 
+## Carte : spécialités, densité, « autour de moi »
+
+- **Spécialité** : une fois une profession choisie (médecin, chirurgien-dentiste, infirmier), un second
+  menu propose ses spécialités ordinales du RPPS. Les libellés doublons de l'ancienne et de la nouvelle
+  maquette de formation sont regroupés (`SPECIALITE_ALIAS` dans `scripts/update_rpps.py` : « médecine
+  générale » n'est plus répartie sur trois entrées). Une personne à deux spécialités compte dans les deux.
+- **Densité** : par défaut la carte colore les départements en praticiens pour 100 000 habitants (population
+  INSEE, `front/public/data/population-departement.json`) ; le bouton bascule vers l'effectif brut, qui ne fait
+  que suivre la population. L'échelle s'arrête au 95ᵉ centile (légende « ≥ N ») : Paris compte près de deux
+  fois plus de praticiens par habitant que le département suivant et délaverait tous les autres. Les
+  praticiens sont comptés là où ils exercent, pas là où habitent les patients : les départements à gros
+  hôpitaux ressortent davantage. La population ne change qu'une fois par an : `python scripts/update_population.py`
+  la remet à jour à la main.
+- **Autour de moi** : demande la position au navigateur, puis classe les établissements de la sélection
+  (profession, spécialité) par distance, avec un lien d'itinéraire. La recherche se fait dans le navigateur, à
+  partir des fichiers déjà servis : la position n'est envoyée nulle part. Un établissement sans adresse
+  géocodée est placé au centre de sa commune et marqué « ≈ ».
+
+## Recherche par nom
+
+La barre « Rechercher un praticien » interroge `GET /api/recherche?q=` : nom et prénom dans n'importe quel
+ordre, en préfixe, sans accents ni casse (« dup marie » trouve « Marie-Laure DUPONT »), 20 résultats au plus. Elle
+s'appuie sur un index plein texte (`praticiens.recherche`, GIN, sans extension Postgres) construit à l'import.
+
+## Historique des effectifs
+
+Chaque jour, le workflow `publish-db.yml` range dans la base les effectifs par département, profession et
+spécialité (`rpps.effectifs_snapshot`, tirés du même fichier que la carte). Après la bascule, le Pi les recopie
+(`scripts/history_upsert.sql`) dans `historique.effectifs` : **un relevé par mois**, le plus récent du mois
+remplaçant le précédent. Ce schéma n'est jamais touché par la mise à jour de `rpps`, c'est lui qui garde la
+mémoire. Il se remplit à partir de la première mise à jour qui suit le déploiement ; rien ne l'affiche encore.
+
+```sql
+SELECT mois, n FROM historique.effectifs
+ WHERE departement = '34' AND profession = 'Médecin' AND specialite = '' ORDER BY mois;
+```
+
 ## Fiche praticien
 
 Depuis la carte, chaque praticien listé a un bouton « Voir la fiche » qui ouvre
@@ -72,7 +114,7 @@ résout déjà vers le Pi (DNS générique), aucun réglage DNS n'est nécessair
 | Données de la carte (fichiers JSON) | GitHub, 5h UTC | `update-rpps.yml` ouvre une PR, la CI est lancée à la main sur sa branche (une PR du jeton d'Actions ne la déclenche pas) puis fusion automatique |
 | Images `api` et `front` (arm64) | GitHub, à chaque fusion dans `main` | `deploy-images.yml` publie sur GHCR ; **Watchtower** (déjà en place sur le Pi) récupère l'image et recrée le conteneur |
 | Base de données (fiches) | GitHub, 5h30 UTC | `publish-db.yml` importe le RPPS dans un PostgreSQL éphémère et publie un dump dans la release `data-latest` |
-| Restauration du dump | Pi, 4h (cron) | `scripts/pi_update_db.sh` : restaure à côté du schéma en service, vérifie, puis bascule par renommage |
+| Restauration du dump | Pi, 4h (cron) | `scripts/pi_update_db.sh` : restaure à côté du schéma en service, vérifie, puis bascule par renommage, puis met à jour l'historique mensuel |
 
 `scripts/pi_update_db.sh` protège le Pi : il ne démarre pas si la charge dépasse 3, vérifie la somme
 de contrôle du dump, met la base en pause dès que la charge atteint 4 (reprise sous 2) et lève
@@ -131,11 +173,13 @@ La base (~1,2 Go) n'est jamais versionnée.
 ## Pipeline de données
 
 Données de la carte : `scripts/update_rpps.py` télécharge le fichier RPPS brut et produit :
-- `front/public/data/rpps-departement.json` — effectif par département et par profession ;
+- `front/public/data/rpps-departement.json` — effectif par département et par profession, et par spécialité ;
 - `front/public/data/rpps-commune.json` — effectif par commune, avec coordonnées ;
+- `front/public/data/rpps-commune-specialite.json` — effectif par commune et par spécialité (fichier creux,
+  téléchargé seulement quand on choisit une spécialité) ;
 - `front/public/data/etablissements/{dept}.json` — le détail par établissement
-  (praticiens nommés avec leur identifiant national), un fichier par département, chargé à la
-  demande par le front.
+  (praticiens nommés avec leur identifiant national et, s'ils en ont, leurs spécialités), un fichier par
+  département, chargé à la demande par le front.
 
 `scripts/geocode_etablissements.py` géocode l'adresse de chaque établissement via la
 [Base Adresse Nationale](https://adresse.data.gouv.fr/) (gratuite, sans clé) et alimente

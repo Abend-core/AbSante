@@ -62,6 +62,16 @@ jobs:
           DB_SCHEMA: rpps_next
         run: npm run import:rpps -- --dir ../data
 
+      # Effectifs du jour, tirés du fichier de la carte (mêmes chiffres), rangés dans la table
+      # effectifs_snapshot : le Pi les recopie dans son historique mensuel. Secondaire, donc un
+      # échec ne bloque pas la publication du dump (la table reste vide).
+      - name: Effectifs du jour pour l'historique
+        continue-on-error: true
+        run: |
+          python3 scripts/snapshot_effectifs.py --out effectifs.csv
+          PGPASSWORD=absante psql -h localhost -p 54329 -U absante -d absante -v ON_ERROR_STOP=1 \
+            -c "\copy rpps_next.effectifs_snapshot (date_donnees, departement, profession, specialite, n) FROM 'effectifs.csv' WITH (FORMAT csv, HEADER true, FORCE_NOT_NULL (specialite))"
+
       - name: Dump
         run: |
           pg_dump --version

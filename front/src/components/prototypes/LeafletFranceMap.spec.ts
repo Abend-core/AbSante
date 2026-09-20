@@ -35,6 +35,8 @@ const { removeSpy, mapOnSpy, fitBoundsSpy, setViewSpy } = vi.hoisted(() => ({
 let geoJsonOnEachFeature: ((feature: unknown, layer: ReturnType<typeof makeLayer>) => void) | undefined
 let geoJsonSetStyleCalls = 0
 let pointsAdded: unknown[] = []
+let nearbyAdded: unknown[] = []
+let layerGroupCalls = 0
 let controlOnAddCalled = false
 
 vi.mock('leaflet', () => {
@@ -89,7 +91,23 @@ vi.mock('leaflet', () => {
         geoJsonOnEachFeature = options.onEachFeature
         return geoJsonLayer
       }),
-      layerGroup: vi.fn(() => layerGroup),
+      // 1er appel = calque des établissements (`layerGroup` ci-dessus) ; 2e = calque « autour de moi »,
+      // suivi à part pour ne pas mélanger ses marqueurs avec ceux des établissements.
+      layerGroup: vi.fn(() => {
+        layerGroupCalls += 1
+        if (layerGroupCalls === 1) return layerGroup
+        return {
+          addTo: vi.fn(function (this: unknown) {
+            return this
+          }),
+          clearLayers: vi.fn(() => {
+            nearbyAdded = []
+          }),
+          addLayer: vi.fn((l: unknown) => {
+            nearbyAdded.push(l)
+          }),
+        }
+      }),
       circleMarker: vi.fn(() => makeLayer()),
       Control: Object.assign(ControlBase, {
         extend: (opts: Record<string, unknown>) => class extends ControlBase {
@@ -149,15 +167,26 @@ const ETABLISSEMENTS_01 = {
   },
 }
 
+// Avec spécialités et population : 1 médecin cardiologue (indice 0) à Testville, 100 000 habitants dans l'Ain.
+const DEPT_PAYLOAD_SPECIALITES = {
+  ...DEPT_PAYLOAD,
+  specialites: [['Médecin', 'Cardiologie']],
+  bySpecialite: { '01': { '0': 2 } },
+}
+const POPULATION_PAYLOAD = { byDepartement: { '01': 100000 } }
+
 function stubFetch(
   communePayload: unknown = COMMUNE_PAYLOAD,
   etablissementsPayload: unknown = ETABLISSEMENTS_01,
+  deptPayload: unknown = DEPT_PAYLOAD,
 ) {
   vi.stubGlobal(
     'fetch',
     vi.fn((url: string) => {
       if (url.includes('departements.geojson')) return Promise.resolve({ json: () => Promise.resolve(GEOJSON) })
-      if (url.includes('rpps-departement.json')) return Promise.resolve({ json: () => Promise.resolve(DEPT_PAYLOAD) })
+      if (url.includes('rpps-departement.json')) return Promise.resolve({ json: () => Promise.resolve(deptPayload) })
+      if (url.includes('population-departement.json')) return Promise.resolve({ json: () => Promise.resolve(POPULATION_PAYLOAD) })
+      if (url.includes('rpps-commune-specialite.json')) return Promise.resolve({ json: () => Promise.resolve({ communes: { '01001': [[0, 2]] } }) })
       if (url.includes('rpps-commune.json')) return Promise.resolve({ json: () => Promise.resolve(communePayload) })
       if (url.includes('/etablissements/01.json'))
         return Promise.resolve({ json: () => Promise.resolve(etablissementsPayload) })
@@ -169,6 +198,8 @@ function stubFetch(
 beforeEach(() => {
   vi.clearAllMocks()
   pointsAdded = []
+  nearbyAdded = []
+  layerGroupCalls = 0
   controlOnAddCalled = false
   geoJsonSetStyleCalls = 0
   stubFetch()
@@ -541,5 +572,147 @@ describe('LeafletFranceMap', () => {
     expect(wrapper.text()).toContain('Martin')
     expect(wrapper.text()).not.toContain('Jean') // le médecin de CH Grandville, filtré
     expect(wrapper.text()).not.toContain('Poulteau')
+  })
+
+  describe('spécialités, densité et « autour de moi »', () => {
+    it('n\'offre le choix de spécialité qu\'aux professions qui en ont', async () => {
+      stubFetch(COMMUNE_PAYLOAD, ETABLISSEMENTS_01, DEPT_PAYLOAD_SPECIALITES)
+      const wrapper = mount(LeafletFranceMap)
+      await flushPromises()
+      expect(wrapper.findAll('select')).toHaveLength(1) // « Toutes les professions » : pas de spécialité
+
+      await wrapper.find('select').setValue('Médecin')
+      const selects = wrapper.findAll('select')
+      expect(selects).toHaveLength(2)
+      expect(selects[1]!.text()).toContain('Cardiologie (2)')
+
+      await wrapper.find('select').setValue('Infirmier') // aucune spécialité pour les infirmiers de ce jeu
+      expect(wrapper.findAll('select')).toHaveLength(1)
+    })
+
+    it('choisir une spécialité recolore la carte en place et affiche ses points communes', async () => {
+      stubFetch(COMMUNE_PAYLOAD, ETABLISSEMENTS_01, DEPT_PAYLOAD_SPECIALITES)
+      const { default: L } = await import('leaflet')
+      const wrapper = mount(LeafletFranceMap)
+      await flushPromises()
+      await wrapper.find('select').setValue('Médecin')
+      await flushPromises()
+      const avant = geoJsonSetStyleCalls
+
+      await wrapper.findAll('select')[1]!.setValue('Cardiologie')
+      await flushPromises()
+
+      expect(geoJsonSetStyleCalls).toBeGreaterThan(avant)
+      expect((L.map as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1) // la carte n'est jamais recréée
+      expect(wrapper.text().replace(/\u00a0/g, ' ')).toContain('Cardiologie pour 100 000 habitants')
+    })
+
+    it('colore par densité par défaut ; la bascule recolore en place et change la légende', async () => {
+      stubFetch(COMMUNE_PAYLOAD, ETABLISSEMENTS_01, DEPT_PAYLOAD_SPECIALITES)
+      const wrapper = mount(LeafletFranceMap)
+      await flushPromises()
+      expect(wrapper.text().replace(/\u00a0/g, ' ')).toContain('Praticiens pour 100 000 habitants')
+      // 5 praticiens / 100 000 habitants -> légende maximale à 5 (pas 5 000)
+      expect(wrapper.find('.color-legend__ticks').text().replace(/\s/g, '')).toBe('05')
+
+      const avant = geoJsonSetStyleCalls
+      await wrapper.find('input[type="checkbox"]').setValue(false)
+      await flushPromises()
+      expect(geoJsonSetStyleCalls).toBeGreaterThan(avant)
+      expect(wrapper.text()).toContain('Praticiens par département')
+    })
+
+    it('la fiche d\'un département indique l\'effectif ET la densité, quel que soit le mode', async () => {
+      const wrapper = mount(LeafletFranceMap)
+      await flushPromises()
+      const layer = makeLayer()
+      geoJsonOnEachFeature!(GEOJSON.features[0], layer)
+      layer.__handlers.click?.()
+      await flushPromises()
+
+      const carte = wrapper.find('.detail-card').text().replace(/\s+/g, ' ')
+      expect(carte).toContain('Ain')
+      expect(carte).toContain('5 praticiens')
+      expect(carte).toContain('5 pour 100 000 hab.')
+    })
+
+    describe('« Autour de moi »', () => {
+      const positionne = (impl: (ok: (p: unknown) => void, err: (e: unknown) => void) => void) =>
+        Object.defineProperty(navigator, 'geolocation', { value: { getCurrentPosition: vi.fn(impl) }, configurable: true })
+      const bouton = (wrapper: ReturnType<typeof mount>) => wrapper.findAll('button').find((b) => b.text().includes('Autour de moi'))!
+
+      it('localise, liste les établissements les plus proches et les place sur la carte', async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+
+        // CH Grandville (géocodé à 190 km) est trop loin ; le cabinet sans adresse géocodée est au centre de Testville
+        const panneau = wrapper.find('.nearby')
+        expect(panneau.text()).toContain('Cabinet Poulteau')
+        expect(panneau.text()).toContain('Testville')
+        expect(panneau.text()).toContain('≈')
+        expect(panneau.text()).not.toContain('CH Grandville')
+        expect(nearbyAdded).toHaveLength(2) // vous + le cabinet
+        expect(fitBoundsSpy).toHaveBeenCalled()
+      })
+
+      it('choisir un résultat affiche ses praticiens', async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+
+        await wrapper.find('.nearby__item').trigger('click')
+        expect(wrapper.find('.detail-card').text()).toContain('Sylvain Poulteau')
+      })
+
+      it('suit la profession choisie : relance la recherche depuis la même position', async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain('Cabinet Poulteau')
+
+        await wrapper.find('select').setValue('Infirmier') // le cabinet n'a qu'un médecin
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).not.toContain('Cabinet Poulteau')
+        expect(wrapper.find('.nearby').text()).toContain('Aucun établissement « Infirmier »')
+        expect(navigator.geolocation.getCurrentPosition).toHaveBeenCalledTimes(1) // pas de nouvelle demande de position
+      })
+
+      it('explique un refus de localisation', async () => {
+        positionne((_ok, err) => err({ code: 1, PERMISSION_DENIED: 1 }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain('Position refusée')
+      })
+
+      it('signale un navigateur sans géolocalisation', async () => {
+        Reflect.deleteProperty(navigator, 'geolocation')
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        expect(wrapper.find('.nearby').text()).toContain('ne permet pas de vous localiser')
+      })
+
+      it('se ferme avec le bouton retour : liste et marqueurs disparaissent', async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+
+        await wrapper.find('.nearby__close').trigger('click')
+        expect(wrapper.find('.nearby').exists()).toBe(false)
+        expect(nearbyAdded).toHaveLength(0)
+      })
+    })
   })
 })

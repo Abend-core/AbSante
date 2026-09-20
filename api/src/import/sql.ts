@@ -14,6 +14,14 @@ const STRUCTURE_FIELDS = [
   'commune', 'pays', 'telephone', 'telephone2', 'telecopie', 'email', 'departement',
 ]
 
+/** Texte de recherche normalisé : sans accents, en minuscules, ponctuation -> espace. Écrit sans
+ *  lower() ni collation sur les lettres accentuées : le Postgres alpine tourne en locale « C », où
+ *  lower('É') ne change rien. Le miroir côté API est `normalizeQuery` (fiche/recherche.ts). */
+const ACCENTS = 'ÀÁÂÄÃÅÇÈÉÊËÌÍÎÏÑÒÓÔÖÕÙÚÛÜÝàáâäãåçèéêëìíîïñòóôöõùúûüýÿ'
+const SANS_ACCENTS = 'AAAAAACEEEEIIIINOOOOOUUUUYaaaaaaceeeeiiiinooooouuuuyy'
+const searchable = (expr: string) =>
+  `regexp_replace(lower(translate(replace(replace(replace(replace(${expr}, 'œ', 'oe'), 'Œ', 'OE'), 'æ', 'ae'), 'Æ', 'AE'), '${ACCENTS}', '${SANS_ACCENTS}')), '[^a-z0-9]+', ' ', 'g')`
+
 const positional = STRUCTURE_FIELDS.map((f) => `COALESCE(${n(f)}, '')`).join(", ")
 const anyStructureField = STRUCTURE_FIELDS.map((f) => n(f)).join(', ')
 
@@ -52,12 +60,18 @@ export function buildSql(s: string): string[] {
          FROM ${s}.stg_activite
         WHERE ${n('id_national')} IS NOT NULL`,
 
+    // Recherche par nom : colonne plein texte (« simple » = sans racinisation ni mots vides, les
+    // noms propres ne sont pas de la langue) sur « nom prénom » normalisé, avec un index GIN. Elle
+    // répond aux préfixes dans n'importe quel ordre (« jean dup », « dupont jean ») sans extension
+    // à installer.
     `CREATE TABLE ${s}.praticiens AS
        SELECT DISTINCT ON (id_national) id_national, id_pp, type_id_pp AS type_identifiant,
-              civilite, civilite_exercice, nom, prenom
+              civilite, civilite_exercice, nom, prenom,
+              to_tsvector('simple', ${searchable("concat_ws(' ', nom, prenom)")}) AS recherche
          FROM ${s}.act
         ORDER BY id_national, nom, prenom, civilite_exercice`,
     `ALTER TABLE ${s}.praticiens ADD PRIMARY KEY (id_national)`,
+    `CREATE INDEX ON ${s}.praticiens USING gin (recherche)`,
 
     `CREATE TABLE ${s}.structures AS
        SELECT DISTINCT ON (structure_cle)
@@ -106,6 +120,15 @@ export function buildSql(s: string): string[] {
           AND (d.code_diplome IS NOT NULL OR d.diplome IS NOT NULL
                OR d.type_autorisation IS NOT NULL OR d.discipline_autorisation IS NOT NULL)`,
     `CREATE INDEX ON ${s}.diplomes (id_national)`,
+
+    // Effectifs par département, profession et spécialité au jour de l'import (voir
+    // scripts/snapshot_effectifs.py). Vide après l'import : le workflow la remplit avant le dump,
+    // puis le Pi la recopie dans l'historique (scripts/history_upsert.sql). Elle existe toujours,
+    // pour que cette recopie n'échoue jamais sur une table absente.
+    `CREATE TABLE ${s}.effectifs_snapshot (
+       date_donnees date NOT NULL, departement text NOT NULL, profession text NOT NULL,
+       specialite text NOT NULL DEFAULT '', n integer NOT NULL,
+       PRIMARY KEY (departement, profession, specialite))`,
 
     `CREATE TABLE ${s}.meta (cle text PRIMARY KEY, valeur text NOT NULL)`,
   ]
