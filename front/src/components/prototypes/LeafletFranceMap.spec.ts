@@ -118,6 +118,7 @@ vi.mock('leaflet', () => {
         },
       }),
       canvas: vi.fn(() => ({})),
+      circle: vi.fn(() => makeLayer()),
       DomUtil: {
         create: vi.fn((tag: string, className?: string, container?: HTMLElement) => {
           const el = document.createElement(tag)
@@ -762,6 +763,71 @@ describe('LeafletFranceMap', () => {
         expect(panneau.text()).not.toContain('CH Grandville')
         expect(nearbyAdded).toHaveLength(2) // vous + le cabinet
         expect(fitBoundsSpy).toHaveBeenCalled()
+      })
+
+      it("position imprécise (localisation par IP) : prévient et trace la zone d'incertitude sur la carte", async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01, accuracy: 45_000 } }))
+        const { default: L } = await import('leaflet')
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('.nearby__warning').text()).toContain('Position approximative (à 45 km près)')
+        expect(L.circle).toHaveBeenCalledWith([45.0, 2.01], expect.objectContaining({ radius: 45_000, interactive: false }))
+        expect(nearbyAdded).toHaveLength(3) // zone d'incertitude + vous + le cabinet
+        // Le cadrage englobe toute la zone d'incertitude (~45 km autour), pas seulement les résultats.
+        const cadre = fitBoundsSpy.mock.calls.at(-1)![0] as [number, number][]
+        const latitudes = cadre.map((p) => p[0])
+        expect(Math.max(...latitudes) - Math.min(...latitudes)).toBeGreaterThan(0.7)
+      })
+
+      it("position imprécise : choisir une ville relance la recherche autour d'elle, sans l'avertissement", async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01, accuracy: 45_000 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby__warning').exists()).toBe(true)
+
+        await wrapper.find('.city-search input').setValue('Testv')
+        await wrapper.find('.city-search__suggestions button').trigger('mousedown')
+        await flushPromises()
+
+        expect(wrapper.find('.nearby').text()).toContain('Autour de Testville')
+        expect(wrapper.find('.nearby__warning').exists()).toBe(false)
+      })
+
+      it("position précise (GPS) : pas d'avertissement ni de cercle d'incertitude", async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01, accuracy: 20 } }))
+        const { default: L } = await import('leaflet')
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+
+        expect(wrapper.find('.nearby__warning').exists()).toBe(false)
+        expect(L.circle).not.toHaveBeenCalled()
+      })
+
+      it("choisir une ville à la place ne garde pas l'avertissement de la position imprécise", async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01, accuracy: 45_000 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby__warning').exists()).toBe(true)
+
+        await wrapper.find('.nearby__close').trigger('click')
+        expect(wrapper.find('.nearby').exists()).toBe(false)
+        positionne((_ok, err) => err({ code: 2 }))
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        await wrapper.find('.city-search input').setValue('Testv')
+        await wrapper.find('.city-search__suggestions button').trigger('mousedown')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain('Autour de Testville')
+        expect(wrapper.find('.nearby__warning').exists()).toBe(false)
       })
 
       it('choisir un résultat affiche ses praticiens', async () => {
