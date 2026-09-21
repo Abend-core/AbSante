@@ -38,6 +38,7 @@ let pointsAdded: unknown[] = []
 let nearbyAdded: unknown[] = []
 let layerGroupCalls = 0
 let controlOnAddCalled = false
+let domClickHandlers = new Map<HTMLElement, (event: Event) => void>()
 
 vi.mock('leaflet', () => {
   const geoJsonLayer = {
@@ -116,18 +117,36 @@ vi.mock('leaflet', () => {
           }
         },
       }),
+      canvas: vi.fn(() => ({})),
       DomUtil: {
-        create: vi.fn(() => document.createElement('button')),
+        create: vi.fn((tag: string, className?: string, container?: HTMLElement) => {
+          const el = document.createElement(tag)
+          if (className) el.className = className
+          container?.appendChild(el)
+          return el
+        }),
       },
       DomEvent: {
         disableClickPropagation: vi.fn(),
-        on: vi.fn(),
+        on: vi.fn((el: HTMLElement, event: string, handler: (event: Event) => void) => {
+          if (event === 'click') domClickHandlers.set(el, handler)
+        }),
       },
     },
   }
 })
 
 import LeafletFranceMap from './LeafletFranceMap.vue'
+
+/** Clique un bouton du contrôle de navigation (sous le zoom), retrouvé par son libellé. */
+function clickNav(titleStart: string) {
+  const button = [...domClickHandlers.keys()].find((el) => el.getAttribute('title')?.startsWith(titleStart))
+  expect(button, `bouton « ${titleStart}… »`).toBeDefined()
+  domClickHandlers.get(button!)!({ preventDefault: () => {} } as Event)
+}
+function navButton(titleStart: string): HTMLElement {
+  return [...domClickHandlers.keys()].find((el) => el.getAttribute('title')?.startsWith(titleStart))!
+}
 
 const GEOJSON = {
   type: 'FeatureCollection',
@@ -201,6 +220,7 @@ beforeEach(() => {
   nearbyAdded = []
   layerGroupCalls = 0
   controlOnAddCalled = false
+  domClickHandlers = new Map()
   geoJsonSetStyleCalls = 0
   stubFetch()
 })
@@ -265,13 +285,9 @@ describe('LeafletFranceMap', () => {
     expect(fitBoundsSpy).toHaveBeenCalledTimes(1) // pas de second appel
   })
 
-  it("cliquer l'anneau bleu revient à l'étape précédente, une par une (ville -> département -> France)", async () => {
+  it("le bouton « étape précédente » revient en arrière une étape à la fois (ville -> département -> France)", async () => {
     const wrapper = mount(LeafletFranceMap)
     await flushPromises()
-
-    const { default: L } = await import('leaflet')
-    const cityHighlightMock = (L.circleMarker as ReturnType<typeof vi.fn>).mock.results[0]
-      .value as ReturnType<typeof makeLayer>
 
     const deptLayer = makeLayer()
     geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
@@ -283,15 +299,55 @@ describe('LeafletFranceMap', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Testville')
 
-    cityHighlightMock.__handlers.click?.()
+    clickNav("Revenir à l'étape précédente")
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Ain')
     expect(wrapper.text()).not.toContain('Testville')
 
-    cityHighlightMock.__handlers.click?.()
+    clickNav("Revenir à l'étape précédente")
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).not.toContain('Ain')
     expect(wrapper.text()).not.toContain('Testville')
+  })
+
+  it("le bouton « étape précédente » est grisé tant qu'il n'y a rien avant, et inopérant dans cet état", async () => {
+    const wrapper = mount(LeafletFranceMap)
+    await flushPromises()
+
+    expect(navButton("Revenir à l'étape précédente").classList.contains('leaflet-disabled')).toBe(true)
+    clickNav("Revenir à l'étape précédente")
+    expect(setViewSpy).not.toHaveBeenCalled()
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(navButton("Revenir à l'étape précédente").classList.contains('leaflet-disabled')).toBe(false)
+
+    clickNav("Revenir à l'étape précédente")
+    expect(navButton("Revenir à l'étape précédente").classList.contains('leaflet-disabled')).toBe(true)
+  })
+
+  it("le bouton « vue France » recadre sur la France entière et efface la sélection", async () => {
+    const wrapper = mount(LeafletFranceMap)
+    await flushPromises()
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('Ain')
+
+    // Le mock de la carte reste au zoom 6 (> zoom France + 0,5) : le bouton est donc actif.
+    const zoomend = mapOnSpy.mock.calls.find((c: unknown[]) => c[0] === 'zoomend')?.[1] as () => void
+    zoomend()
+    await wrapper.vm.$nextTick()
+    expect(navButton('Revenir à la vue France').classList.contains('leaflet-disabled')).toBe(false)
+
+    clickNav('Revenir à la vue France')
+    await wrapper.vm.$nextTick()
+    expect(setViewSpy).toHaveBeenLastCalledWith([46.6, 2.4], 5)
+    expect(wrapper.text()).not.toContain('Ain')
   })
 
   it("les points et l'anneau vivent dans leurs propres calques, au-dessus des départements (régression : le département survolé remontait par-dessus les points et les rendait incliquables)", async () => {
@@ -312,13 +368,15 @@ describe('LeafletFranceMap', () => {
     for (const p of points) expect(p[1].pane).toBe('etablissements')
   })
 
-  it("l'anneau « retour » n'a pas de remplissage et passe sous les points (régression : son disque cliquable rendait inutilisable tout établissement qu'il entourait)", async () => {
+  it("l'anneau de repère n'est plus cliquable, n'a pas de remplissage et passe sous les points (il ne doit jamais gêner le clic sur un établissement qu'il entoure)", async () => {
     const { default: L } = await import('leaflet')
     mount(LeafletFranceMap)
     await flushPromises()
 
-    const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [unknown, { radius: number; fill?: boolean }][]
-    expect(calls.find((c) => c[1].radius === 16)?.[1].fill).toBe(false)
+    const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [unknown, { radius: number; fill?: boolean; interactive?: boolean }][]
+    const ring = calls.find((c) => c[1].radius === 16)
+    expect(ring?.[1].fill).toBe(false)
+    expect(ring?.[1].interactive).toBe(false)
 
     const mapMock = (L.map as ReturnType<typeof vi.fn>).mock.results[0].value as { createPane: ReturnType<typeof vi.fn> }
     const zIndexOf = (name: string) => {
@@ -328,13 +386,10 @@ describe('LeafletFranceMap', () => {
     expect(zIndexOf('repere')).toBeLessThan(zIndexOf('etablissements'))
   })
 
-  it("recliquer la commune déjà affichée n'ajoute pas d'étape : l'anneau ramène au département, pas sur la même fiche", async () => {
+  it("recliquer la commune déjà affichée n'ajoute pas d'étape : « précédent » ramène au département, pas sur la même fiche", async () => {
     stubFetch(COMMUNE_PAYLOAD, { updatedAt: '2026-09-17T00:00:00Z', communes: {} })
     const wrapper = mount(LeafletFranceMap)
     await flushPromises()
-
-    const { default: L } = await import('leaflet')
-    const ring = (L.circleMarker as ReturnType<typeof vi.fn>).mock.results[0].value as ReturnType<typeof makeLayer>
 
     const deptLayer = makeLayer()
     geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
@@ -347,7 +402,7 @@ describe('LeafletFranceMap', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('Testville')
 
-    ring.__handlers.click?.()
+    clickNav("Revenir à l'étape précédente")
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).not.toContain('Testville')
     expect(wrapper.text()).toContain('Ain')
@@ -393,10 +448,61 @@ describe('LeafletFranceMap', () => {
     expect(wrapper.text()).toContain('Ain')
   })
 
-  it("sans département zoomé, aucun point ne s'affiche (des milliers de communes nationales feraient une masse illisible)", async () => {
+  it("vue France : un petit point non cliquable par commune, sur un calque canevas à part (régression : rien ne s'affichait sans département zoomé)", async () => {
+    const { default: L } = await import('leaflet')
     mount(LeafletFranceMap)
     await flushPromises()
-    expect(pointsAdded).toHaveLength(0)
+
+    expect(pointsAdded.length).toBeGreaterThan(0)
+    const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [
+      unknown,
+      { radius: number; pane?: string; interactive?: boolean; renderer?: unknown },
+    ][]
+    const dots = calls.filter((c) => c[1].pane === 'communes-france')
+    expect(dots.length).toBe(pointsAdded.length)
+    for (const [, options] of dots) {
+      expect(options.interactive).toBe(false) // ne bloque pas le clic sur les départements
+      expect(options.radius).toBeLessThan(5) // plus petits que les points d'un département zoomé
+      expect(options.renderer).toBeDefined() // canevas : 16 000 éléments SVG ralentiraient la carte
+    }
+    const mapMock = (L.map as ReturnType<typeof vi.fn>).mock.results[0].value as { createPane: ReturnType<typeof vi.fn> }
+    const i = mapMock.createPane.mock.calls.findIndex((c) => c[0] === 'communes-france')
+    expect((mapMock.createPane.mock.results[i].value as HTMLElement).style.pointerEvents).toBe('none')
+  })
+
+  it("la taille des points de la vue France suit le zoom", async () => {
+    const { default: L } = await import('leaflet')
+    mount(LeafletFranceMap)
+    await flushPromises()
+
+    const mapMock = (L.map as ReturnType<typeof vi.fn>).mock.results[0].value as { getZoom: ReturnType<typeof vi.fn> }
+    const zoomend = mapOnSpy.mock.calls.find((c: unknown[]) => c[0] === 'zoomend')?.[1] as () => void
+    const radiusAt = (zoom: number) => {
+      mapMock.getZoom.mockReturnValue(zoom)
+      zoomend()
+      const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [unknown, { radius: number; pane?: string }][]
+      return calls.filter((c) => c[1].pane === 'communes-france').at(-1)![1].radius
+    }
+    const small = radiusAt(5)
+    const large = radiusAt(8)
+    expect(large).toBeGreaterThan(small)
+  })
+
+  it("en zoomant un département, les petits points de la vue France cèdent la place aux points communes/établissements", async () => {
+    const { default: L } = await import('leaflet')
+    mount(LeafletFranceMap)
+    await flushPromises()
+
+    const deptLayer = makeLayer()
+    geoJsonOnEachFeature!(GEOJSON.features[0], deptLayer)
+    deptLayer.__handlers.click?.()
+    await flushPromises()
+
+    const calls = (L.circleMarker as ReturnType<typeof vi.fn>).mock.calls as [unknown, { pane?: string }][]
+    const lastPane = calls.at(-1)![1].pane
+    expect(lastPane).toBe('etablissements')
+    for (const marker of pointsAdded) expect(marker).toBeDefined()
+    expect(pointsAdded).toHaveLength(2) // CH Grandville + point commune, comme avant
   })
 
   it('le clic sur un point commune affiche son détail et zoome sur la ville (pas au survol)', async () => {
@@ -449,7 +555,6 @@ describe('LeafletFranceMap', () => {
   it('un établissement géocodé obtient son propre point à sa vraie adresse, distinct du point commune', async () => {
     mount(LeafletFranceMap)
     await flushPromises()
-    expect(pointsAdded).toHaveLength(0) // avant le zoom département : aucun point
 
     // Clic département -> zoomedDept = '01' -> charge etablissements/01.json -> refreshData
     const layer = makeLayer()
