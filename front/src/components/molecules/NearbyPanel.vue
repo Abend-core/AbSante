@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NearbyResult } from '../../composables/useNearby'
 import { formatDistance } from '../../utils/format'
-import { itineraireUrl } from '../../utils/geo'
+import { itineraireUrl, POSITION_IMPRECISE_M } from '../../utils/geo'
 import IconButton from '../atoms/IconButton.vue'
 import ExternalLink from '../atoms/ExternalLink.vue'
 
@@ -14,6 +14,8 @@ defineProps<{
   label: string | null
   /** Ville choisie à la place de la position de l'appareil, `null` = autour de la personne. */
   where?: string | null
+  /** Rayon d'incertitude de la position donnée par le navigateur, en mètres (`null` = inconnu). */
+  accuracyM?: number | null
 }>()
 defineEmits<{ select: [result: NearbyResult]; close: [] }>()
 
@@ -51,6 +53,10 @@ const noms = (r: NearbyResult) => {
     </p>
     <p v-else-if="status === 'error'" class="nearby__message">La recherche des établissements a échoué, réessayez dans un instant.</p>
     <template v-else>
+      <p v-if="accuracyM != null && accuracyM >= POSITION_IMPRECISE_M" class="nearby__warning" role="alert">
+        Position approximative (à {{ formatDistance(accuracyM / 1000) }} près) : votre navigateur vous situe d'après votre connexion internet, pas par GPS.
+        Pour une recherche précise, choisissez une ville avec la barre de recherche.
+      </p>
       <p v-if="results.length === 0" class="nearby__message">
         Aucun établissement{{ label ? ` « ${label} »` : '' }} trouvé à moins de 60 km.
       </p>
@@ -99,6 +105,15 @@ const noms = (r: NearbyResult) => {
 }
 
 .nearby__message,
+.nearby__warning {
+  margin: 0.5rem 0 0.25rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
 .nearby__hint {
   margin: 0.4rem 0 0;
   font-size: 0.82rem;
