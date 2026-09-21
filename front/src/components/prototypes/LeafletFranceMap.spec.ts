@@ -804,7 +804,85 @@ describe('LeafletFranceMap', () => {
         const wrapper = mount(LeafletFranceMap)
         await flushPromises()
         await bouton(wrapper).trigger('click')
-        expect(wrapper.find('.nearby').text()).toContain('ne permet pas de vous localiser')
+        expect(wrapper.find('.nearby').text()).toContain('La localisation n\'est pas disponible ici')
+      })
+
+      it('signale un site ouvert sans https, où les navigateurs refusent la localisation', async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true })
+        try {
+          const wrapper = mount(LeafletFranceMap)
+          await flushPromises()
+          await bouton(wrapper).trigger('click')
+          expect(wrapper.find('.nearby').text()).toContain('sans https')
+          expect(navigator.geolocation.getCurrentPosition).not.toHaveBeenCalled()
+        } finally {
+          Reflect.deleteProperty(window, 'isSecureContext')
+        }
+      })
+
+      it("distingue un appareil qui n'arrive pas à se localiser d'un délai dépassé", async () => {
+        positionne((_ok, err) => err({ code: 2 }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain("n'arrive pas à déterminer sa position")
+
+        positionne((_ok, err) => err({ code: 3 }))
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain('a pris trop de temps')
+      })
+
+      it("laisse plus de temps à la localisation qu'avant (10 s ne suffisaient pas toujours)", async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        const options = (navigator.geolocation.getCurrentPosition as ReturnType<typeof vi.fn>).mock.calls[0]![2] as { timeout: number }
+        expect(options.timeout).toBeGreaterThanOrEqual(20_000)
+      })
+
+      it("un échec de la recherche (et non de la localisation) ne prétend pas que la position est introuvable", async () => {
+        positionne((ok) => ok({ coords: { latitude: 45.0, longitude: 2.01 } }))
+        stubFetch(COMMUNE_PAYLOAD, { updatedAt: '2026-09-17T00:00:00Z', communes: {} })
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('réseau'))))
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain('La recherche des établissements a échoué')
+        expect(wrapper.find('.nearby').text()).not.toContain('localiser')
+        vi.unstubAllGlobals()
+      })
+
+      it("localisation impossible : choisir une ville lance la recherche autour d'elle, et le panneau le dit", async () => {
+        positionne((_ok, err) => err({ code: 2 }))
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await bouton(wrapper).trigger('click')
+        await flushPromises()
+        expect(wrapper.find('.nearby').text()).toContain('choisissez une ville')
+
+        const input = wrapper.find('input[type="search"]')
+        await input.setValue('Testv')
+        await wrapper.find('.city-search__suggestions button').trigger('mousedown')
+        await flushPromises()
+
+        const panneau = wrapper.find('.nearby')
+        expect(panneau.text()).toContain('Autour de Testville')
+        expect(panneau.text()).toContain('Cabinet Poulteau')
+        expect(navigator.geolocation.getCurrentPosition).toHaveBeenCalledTimes(1) // pas de nouvelle demande de position
+      })
+
+      it("sans échec de localisation, choisir une ville ne lance pas de recherche « autour de moi »", async () => {
+        const wrapper = mount(LeafletFranceMap)
+        await flushPromises()
+        await wrapper.find('input[type="search"]').setValue('Testv')
+        await wrapper.find('.city-search__suggestions button').trigger('mousedown')
+        await flushPromises()
+        expect(wrapper.find('.nearby').exists()).toBe(false)
       })
 
       it('se ferme avec le bouton retour : liste et marqueurs disparaissent', async () => {
