@@ -47,6 +47,13 @@ const deptDetail = computed(() => {
 
 const nearbyStatus = ref<NearbyStatus>('idle')
 const nearbyResults = ref<NearbyResult[]>([])
+/** Ville choisie à la place de la position de l'appareil (repli quand la localisation échoue). */
+const nearbyWhere = ref<string | null>(null)
+/** Échecs de localisation après lesquels choisir une ville lance la recherche autour d'elle. */
+const LOCATION_FAILURES: NearbyStatus[] = ['denied', 'unsupported', 'unavailable', 'timeout']
+// Codes de GeolocationPositionError.
+const PERMISSION_DENIED = 1
+const TIMEOUT = 3
 
 /** Taille FIXE des points commune/établissement : la taille ne code plus une
  *  grandeur (retiré, imprécis visuellement) — la densité de points suffit à
@@ -473,24 +480,31 @@ function resetZoom() {
  *  correspondent à la sélection (profession, spécialité). La position n'est jamais envoyée
  *  nulle part : tout se calcule ici, à partir des fichiers de données déjà servis. */
 function locateMe() {
-  if (!('geolocation' in navigator)) {
+  nearbyRun++ // ignore une recherche encore en cours
+  nearbyWhere.value = null
+  nearbyResults.value = []
+  nearbyLayer?.clearLayers()
+  // La géolocalisation exige une connexion sécurisée (https) : sans, les navigateurs la refusent.
+  if (!('geolocation' in navigator) || window.isSecureContext === false) {
     nearbyStatus.value = 'unsupported'
     return
   }
   nearbyStatus.value = 'locating'
-  nearbyResults.value = []
   navigator.geolocation.getCurrentPosition(
     (pos) => void searchNearby([pos.coords.latitude, pos.coords.longitude]),
     (err) => {
-      nearbyStatus.value = err.code === err.PERMISSION_DENIED ? 'denied' : 'error'
+      // Refus, appareil qui n'arrive pas à se localiser (fréquent sur ordinateur), ou délai dépassé :
+      // trois causes différentes, à ne pas confondre avec un échec de la recherche qui suit.
+      nearbyStatus.value = err.code === PERMISSION_DENIED ? 'denied' : err.code === TIMEOUT ? 'timeout' : 'unavailable'
     },
-    { timeout: 10_000, maximumAge: 60_000 },
+    { timeout: 20_000, maximumAge: 60_000 },
   )
 }
 
-async function searchNearby(origin: LatLon) {
+async function searchNearby(origin: LatLon, where: string | null = null) {
   const run = ++nearbyRun
   nearbyOrigin = origin
+  nearbyWhere.value = where
   nearbyStatus.value = 'searching'
   try {
     const results = await findNearby(origin, {
@@ -511,7 +525,7 @@ function drawNearby(origin: LatLon, results: NearbyResult[]) {
   if (!map || !nearbyLayer) return
   nearbyLayer.clearLayers()
   const me = L.circleMarker(origin, { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1, pane: ETABLISSEMENTS_PANE })
-  me.bindTooltip('Vous êtes ici')
+  me.bindTooltip(nearbyWhere.value ? `Centre de ${nearbyWhere.value}` : 'Vous êtes ici')
   nearbyLayer.addLayer(me)
   for (const r of results) {
     const marker = makeMarker(r.position[0], r.position[1])
@@ -530,6 +544,7 @@ function onSelectNearby(r: NearbyResult) {
 function closeNearby() {
   nearbyRun++ // ignore une recherche encore en cours
   nearbyOrigin = null
+  nearbyWhere.value = null
   nearbyStatus.value = 'idle'
   nearbyResults.value = []
   nearbyLayer?.clearLayers()
@@ -550,6 +565,9 @@ function selectCity(c: CommuneOption) {
   selectedPoint.value = { nom: c.nom, n: match?.n ?? 0 }
   stats.zoomedDept.value = c.dept
   focusCity(c.lat, c.lon, cityZoomFor(c.total))
+  // Localisation impossible (ou déjà en mode « autour d'une ville ») : la ville choisie sert de
+  // point de départ à « Autour de moi ».
+  if (nearbyWhere.value !== null || LOCATION_FAILURES.includes(nearbyStatus.value)) void searchNearby([c.lat, c.lon], c.nom)
 }
 
 /** Unité des effectifs affichés : « praticiens », « infirmier », « praticiens en cardiologie »... */
@@ -592,7 +610,7 @@ watch(
 )
 // « Autour de moi » suit la sélection : changer de profession relance la recherche depuis la même position.
 watch([() => stats.selectedProfession.value, () => stats.selectedSpecialiteIdx.value], () => {
-  if (nearbyOrigin && nearbyStatus.value !== 'idle') void searchNearby(nearbyOrigin)
+  if (nearbyOrigin && nearbyStatus.value !== 'idle') void searchNearby(nearbyOrigin, nearbyWhere.value)
 })
 watch(showEtablissements, (visible) => {
   if (!map || !pointsLayer) return
@@ -659,6 +677,7 @@ onBeforeUnmount(() => {
       :status="nearbyStatus"
       :results="nearbyResults"
       :label="stats.selectionLabel.value"
+      :where="nearbyWhere"
       @select="onSelectNearby"
       @close="closeNearby"
     />

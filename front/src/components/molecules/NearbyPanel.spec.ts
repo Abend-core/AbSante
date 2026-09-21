@@ -23,10 +23,21 @@ describe('NearbyPanel', () => {
     ['locating', 'Localisation en cours'],
     ['searching', 'Recherche des établissements'],
     ['denied', 'Position refusée'],
-    ['unsupported', 'ne permet pas de vous localiser'],
-    ['error', 'Impossible de vous localiser'],
+    ['unsupported', 'La localisation n\'est pas disponible ici'],
+    ['unavailable', 'n\'arrive pas à déterminer sa position'],
+    ['timeout', 'a pris trop de temps'],
+    ['error', 'La recherche des établissements a échoué'],
   ] as const)('explique l\'état « %s »', (status, texte) => {
     expect(mount(NearbyPanel, { props: { status, results: [], label: null } }).text()).toContain(texte)
+  })
+
+  it.each(['denied', 'unsupported', 'unavailable', 'timeout'] as const)('« %s » propose de choisir une ville à la place', (status) => {
+    expect(mount(NearbyPanel, { props: { status, results: [], label: null } }).text()).toContain('choisissez une ville')
+  })
+
+  it('nomme la ville quand la recherche part d\'elle plutôt que de la position', () => {
+    expect(mount(NearbyPanel, { props: { status: 'done', results: [], label: null, where: 'Bourges' } }).text()).toContain('Autour de Bourges')
+    expect(mount(NearbyPanel, { props: { status: 'done', results: [], label: null } }).text()).toContain('Autour de vous')
   })
 
   it('liste les établissements avec distance, commune, praticiens et lien d\'itinéraire', () => {

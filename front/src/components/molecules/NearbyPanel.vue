@@ -5,17 +5,20 @@ import { itineraireUrl } from '../../utils/geo'
 import IconButton from '../atoms/IconButton.vue'
 import ExternalLink from '../atoms/ExternalLink.vue'
 
-export type NearbyStatus = 'idle' | 'locating' | 'searching' | 'done' | 'denied' | 'unsupported' | 'error'
+export type NearbyStatus = 'idle' | 'locating' | 'searching' | 'done' | 'denied' | 'unsupported' | 'unavailable' | 'timeout' | 'error'
 
 defineProps<{
   status: NearbyStatus
   results: NearbyResult[]
   /** Profession ou spécialité recherchée, `null` = tous les praticiens. */
   label: string | null
+  /** Ville choisie à la place de la position de l'appareil, `null` = autour de la personne. */
+  where?: string | null
 }>()
 defineEmits<{ select: [result: NearbyResult]; close: [] }>()
 
 const PRATICIENS_MONTRES = 3
+const CHOISIR_VILLE = "Sinon, choisissez une ville avec la barre de recherche : on listera les établissements autour d'elle."
 
 const noms = (r: NearbyResult) => {
   const liste = r.etablissement.praticiens
@@ -27,7 +30,7 @@ const noms = (r: NearbyResult) => {
 <template>
   <section v-if="status !== 'idle'" class="nearby" aria-label="Autour de moi" aria-live="polite">
     <header class="nearby__header">
-      <strong>Autour de vous</strong>
+      <strong>{{ where ? `Autour de ${where}` : 'Autour de vous' }}</strong>
       <span v-if="label" class="nearby__label">{{ label }}</span>
       <IconButton class="nearby__close" icon="close" label="Fermer" :size="16" @click="$emit('close')" />
     </header>
@@ -35,10 +38,18 @@ const noms = (r: NearbyResult) => {
     <p v-if="status === 'locating'" class="nearby__message">Localisation en cours… (votre navigateur peut vous demander l'autorisation)</p>
     <p v-else-if="status === 'searching'" class="nearby__message">Recherche des établissements les plus proches…</p>
     <p v-else-if="status === 'denied'" class="nearby__message">
-      Position refusée. Autorisez la localisation pour ce site dans votre navigateur, ou cherchez une ville avec la barre de recherche.
+      Position refusée. Autorisez la localisation pour ce site dans votre navigateur. {{ CHOISIR_VILLE }}
     </p>
-    <p v-else-if="status === 'unsupported'" class="nearby__message">Votre navigateur ne permet pas de vous localiser. Cherchez une ville avec la barre de recherche.</p>
-    <p v-else-if="status === 'error'" class="nearby__message">Impossible de vous localiser pour l'instant, réessayez dans un instant.</p>
+    <p v-else-if="status === 'unsupported'" class="nearby__message">
+      La localisation n'est pas disponible ici (navigateur non compatible, ou site ouvert sans https). {{ CHOISIR_VILLE }}
+    </p>
+    <p v-else-if="status === 'unavailable'" class="nearby__message">
+      Votre appareil n'arrive pas à déterminer sa position (fréquent sur ordinateur, sans GPS). {{ CHOISIR_VILLE }}
+    </p>
+    <p v-else-if="status === 'timeout'" class="nearby__message">
+      La localisation a pris trop de temps : réessayez. {{ CHOISIR_VILLE }}
+    </p>
+    <p v-else-if="status === 'error'" class="nearby__message">La recherche des établissements a échoué, réessayez dans un instant.</p>
     <template v-else>
       <p v-if="results.length === 0" class="nearby__message">
         Aucun établissement{{ label ? ` « ${label} »` : '' }} trouvé à moins de 60 km.
