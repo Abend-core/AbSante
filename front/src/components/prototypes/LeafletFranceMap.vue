@@ -60,6 +60,8 @@ const FRANCE_ZOOM = 5
 const ETABLISSEMENT_ZOOM = 17
 const ETABLISSEMENTS_PANE = 'etablissements'
 const REPERE_PANE = 'repere'
+/** Petits points communes de la vue France : calque à part (canevas, non cliquable), voir drawFrancePoints. */
+const FRANCE_PANE = 'communes-france'
 
 let map: L.Map | null = null
 let polygonsLayer: L.GeoJSON | null = null
@@ -68,12 +70,15 @@ let nearbyLayer: L.LayerGroup | null = null
 let nearbyOrigin: LatLon | null = null
 let nearbyRun = 0
 let cityHighlight: L.CircleMarker | null = null
-let resetButton: HTMLButtonElement | null = null
+let franceRenderer: L.Canvas | null = null
+let franceRadius = 0
+let backButton: HTMLElement | null = null
+let resetButton: HTMLElement | null = null
 let colorScale = createColorScale([1])
 
 /** Pile des vues visitées (France -> département -> ville -> établissement...) pour
- *  permettre au clic sur l'anneau bleu de revenir en arrière PAS À PAS, pas
- *  directement à la vue France (c'est le rôle du bouton "retour" en haut à droite). */
+ *  permettre au bouton « étape précédente » de revenir en arrière PAS À PAS, pas
+ *  directement à la vue France (c'est le rôle du bouton « vue France », juste dessous). */
 interface ViewSnapshot {
   lat: number
   lon: number
@@ -99,9 +104,10 @@ function pushView() {
     selectedDept: selectedDept.value,
     ring: ringPos ? { lat: ringPos.lat, lon: ringPos.lng } : null,
   })
+  syncNavButtons()
 }
 
-/** Clic sur l'anneau bleu : revient à l'état précédent (établissement -> ville ->
+/** Bouton « étape précédente » : revient à l'état précédent (établissement -> ville ->
  *  département -> France), une étape à la fois. Pile vide -> plus rien avant,
  *  équivaut à la vue France entière. */
 function goBack() {
@@ -110,6 +116,7 @@ function goBack() {
     resetZoom()
     return
   }
+  syncNavButtons()
   stats.zoomedDept.value = prev.zoomedDept
   selectedPoint.value = prev.selectedPoint
   selectedDept.value = prev.selectedDept
@@ -155,24 +162,50 @@ function baseStyle(feature?: GeoJSON.GeoJsonObject): L.PathOptions {
   }
 }
 
-/** Bouton personnalisé "retour à la vue France entière", empilé par Leaflet
- *  sous le zoom +/- natif (même coin topright) -> pas de calcul de position à
- *  la main, contrairement au bouton flottant qu'il fallait repositionner
- *  manuellement sur le prototype amCharts. */
-const ResetControl = L.Control.extend({
+const BACK_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>'
+const RESET_ICON =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">' +
+  '<path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M9 21H5a2 2 0 0 1-2-2v-4M15 21h4a2 2 0 0 0 2-2v-4" /></svg>'
+
+function setNavDisabled(button: HTMLElement | null, disabled: boolean) {
+  if (!button) return
+  button.classList.toggle('leaflet-disabled', disabled)
+  button.setAttribute('aria-disabled', String(disabled))
+}
+
+/** « Retour » actif seulement s'il y a une étape précédente ; « vue France » seulement une fois zoomé. */
+function syncNavButtons() {
+  setNavDisabled(backButton, viewStack.length === 0)
+  setNavDisabled(resetButton, !isZoomed.value)
+}
+
+/** Boutons de navigation, empilés par Leaflet sous le zoom +/- natif (même coin topright, même
+ *  apparence `leaflet-bar`) -> pas de calcul de position à la main, contrairement au bouton
+ *  flottant qu'il fallait repositionner manuellement sur le prototype amCharts. */
+const NavControl = L.Control.extend({
   options: { position: 'topright' },
   onAdd() {
-    const btn = L.DomUtil.create('button', 'reset-control') as HTMLButtonElement
-    btn.type = 'button'
-    btn.title = 'Revenir à la vue France entière (raccourci : Échap)'
-    btn.disabled = true
-    btn.innerHTML =
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">' +
-      '<path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M9 21H5a2 2 0 0 1-2-2v-4M15 21h4a2 2 0 0 0 2-2v-4" /></svg>'
-    L.DomEvent.disableClickPropagation(btn)
-    L.DomEvent.on(btn, 'click', resetZoom)
-    resetButton = btn
-    return btn
+    const bar = L.DomUtil.create('div', 'leaflet-bar nav-control') as HTMLDivElement
+    const addButton = (icon: string, title: string, onClick: () => void) => {
+      const btn = L.DomUtil.create('a', 'nav-control-button', bar) as HTMLElement
+      btn.setAttribute('role', 'button')
+      btn.setAttribute('href', '#')
+      btn.setAttribute('title', title)
+      btn.setAttribute('aria-label', title)
+      btn.innerHTML = icon
+      L.DomEvent.on(btn, 'click', (event: Event) => {
+        event.preventDefault()
+        if (!btn.classList.contains('leaflet-disabled')) onClick()
+      })
+      return btn
+    }
+    backButton = addButton(BACK_ICON, "Revenir à l'étape précédente", goBack)
+    resetButton = addButton(RESET_ICON, 'Revenir à la vue France entière (raccourci : Échap)', resetZoom)
+    L.DomEvent.disableClickPropagation(bar)
+    syncNavButtons()
+    return bar
   },
 })
 
@@ -204,6 +237,13 @@ function initMap() {
   // établissement, il ne doit jamais empêcher de cliquer un établissement voisin.
   map.createPane(REPERE_PANE).style.zIndex = '440'
   map.createPane(ETABLISSEMENTS_PANE).style.zIndex = '450'
+  // Points de la vue France : posés au-dessus des départements mais sans aucune interaction
+  // (pointer-events: none), sinon leur canevas, qui couvre toute la carte, bloquerait le clic
+  // sur les départements.
+  const francePane = map.createPane(FRANCE_PANE)
+  francePane.style.zIndex = '450'
+  francePane.style.pointerEvents = 'none'
+  franceRenderer = L.canvas({ pane: FRANCE_PANE })
   // Fond de plan OpenStreetMap standard : pas de clé requise, contrairement
   // aux styles CARTO hébergés (basemaps.cartocdn.com exige désormais une clé
   // API sur leur offre gratuite, vérifié par capture d'écran -> tuiles
@@ -214,15 +254,16 @@ function initMap() {
   }).addTo(map)
 
   map.zoomControl.setPosition('topright')
-  new ResetControl().addTo(map)
+  new NavControl().addTo(map)
 
   // N'importe quel changement de niveau de zoom (clic département, boutons
-  // +/- natifs, molette...) active/désactive le bouton retour, et ajuste
-  // l'opacité du département (voir deptFillOpacityFor) — pas seulement le
-  // clic sur un département.
+  // +/- natifs, molette...) active/désactive le bouton « vue France », ajuste
+  // l'opacité du département (voir deptFillOpacityFor) et la taille des points de la
+  // vue France — pas seulement le clic sur un département.
   map.on('zoomend', () => {
     isZoomed.value = (map?.getZoom() ?? FRANCE_ZOOM) > FRANCE_ZOOM + 0.5
     polygonsLayer?.setStyle(baseStyle)
+    if (!stats.zoomedDept.value && franceDotRadius() !== franceRadius) drawFrancePoints()
   })
 
   polygonsLayer = L.geoJSON(
@@ -265,21 +306,18 @@ function initMap() {
     },
   ).addTo(map)
 
-  // Seul le trait de l'anneau est cliquable (pas de remplissage) : un disque
-  // cliquable recouvrait les établissements situés dans l'anneau — dont celui
-  // qu'il entoure — et les rendait inutilisables (clic = retour en arrière).
-  // Trait épais (6 px) pour garder une cible confortable, et calque sous les points.
+  // Simple repère « vous êtes ici » : non cliquable (le retour en arrière passe par le bouton
+  // de la carte), donc il ne gêne jamais le clic sur un établissement qu'il entoure.
+  // Sans remplissage, et calque sous les points.
   cityHighlight = L.circleMarker(FRANCE_CENTER, {
     radius: 16,
     color: '#1e88e5',
     weight: 6,
     opacity: 0.85,
     fill: false,
-    interactive: true,
+    interactive: false,
     pane: REPERE_PANE,
   })
-  cityHighlight.on('click', goBack)
-  cityHighlight.bindTooltip('Revenir en arrière', { direction: 'top', offset: [0, -16] })
 
   pointsLayer = L.layerGroup()
   if (showEtablissements.value) pointsLayer.addTo(map)
@@ -296,6 +334,46 @@ function makeMarker(lat: number, lon: number): L.CircleMarker {
     stroke: false,
     pane: ETABLISSEMENTS_PANE,
   })
+}
+
+/** Rayon des petits points de la vue France : minuscules à l'échelle du pays (16 000 communes
+ *  se chevaucheraient), plus gros à mesure qu'on zoome. */
+function franceDotRadius(): number {
+  const zoom = map?.getZoom() ?? FRANCE_ZOOM
+  if (zoom <= 5) return 1
+  if (zoom === 6) return 1.5
+  if (zoom === 7) return 2.5
+  return 4
+}
+
+/** Très translucides à l'échelle du pays : les points se superposent, si bien que seules les zones
+ *  denses virent au rouge plein, sans masquer les couleurs des départements sous les zones rurales. */
+function franceDotOpacity(radius: number): number {
+  if (radius <= 1) return 0.3
+  if (radius <= 1.5) return 0.4
+  return 0.6
+}
+
+/** Vue France (aucun département zoomé) : un petit point par commune qui a des praticiens pour
+ *  la sélection, pour voir où ils se concentrent. Dessinés sur un canevas (16 000 éléments SVG
+ *  ralentiraient la carte) et non cliquables : le détail s'obtient en zoomant un département. */
+function drawFrancePoints() {
+  if (!pointsLayer) return
+  pointsLayer.clearLayers()
+  franceRadius = franceDotRadius()
+  for (const p of stats.visiblePoints.value) {
+    pointsLayer.addLayer(
+      L.circleMarker([p.lat, p.lon], {
+        radius: franceRadius,
+        fillColor: '#d9534f',
+        fillOpacity: franceDotOpacity(franceRadius),
+        stroke: false,
+        interactive: false,
+        pane: FRANCE_PANE,
+        renderer: franceRenderer ?? undefined,
+      }),
+    )
+  }
 }
 
 /** Affiche le détail nominatif d'un établissement (praticiens) et s'y recentre.
@@ -321,12 +399,15 @@ function refreshData() {
 
   const dept = stats.zoomedDept.value
 
-  pointsLayer.clearLayers()
   // Sans département zoomé, stats.visiblePoints couvre TOUTE la France (~16 000 communes) :
-  // à taille fixe, ça donne une masse rouge illisible qui recouvre le pays plutôt que des
-  // points distincts -> les points ne s'affichent qu'une fois zoomé sur un département,
-  // comme les établissements (dont ils ont de toute façon besoin pour être utiles).
-  if (!dept) return
+  // à taille fixe, ça donne une masse rouge illisible -> petits points non cliquables qui
+  // grossissent avec le zoom (drawFrancePoints), le détail (établissements) venant une fois
+  // un département zoomé.
+  if (!dept) {
+    drawFrancePoints()
+    return
+  }
+  pointsLayer.clearLayers()
 
   for (const p of stats.visiblePoints.value) {
     // Le filtre de profession ne limite plus l'éclatement en établissements : chaque
@@ -385,6 +466,7 @@ function resetZoom() {
   clearCityHighlight()
   selectedPoint.value = null
   selectedDept.value = null
+  syncNavButtons()
 }
 
 /** « Autour de moi » : localise le visiteur puis cherche les établissements les plus proches qui
@@ -517,9 +599,7 @@ watch(showEtablissements, (visible) => {
   if (visible) pointsLayer.addTo(map)
   else map.removeLayer(pointsLayer)
 })
-watch(isZoomed, (zoomed) => {
-  if (resetButton) resetButton.disabled = !zoomed
-})
+watch(isZoomed, syncNavButtons)
 
 onBeforeUnmount(() => {
   map?.remove()
@@ -629,30 +709,14 @@ onBeforeUnmount(() => {
 }
 </style>
 
-<!-- Non scoped : le bouton "retour" est créé par L.DomUtil hors du rendu Vue,
-     il n'a donc pas l'attribut data-v-xxx qu'un style scoped exigerait. -->
+<!-- Non scoped : les boutons de navigation sont créés par L.DomUtil hors du rendu Vue,
+     ils n'ont donc pas l'attribut data-v-xxx qu'un style scoped exigerait. Le reste de
+     l'apparence (fond, bordure, survol, état désactivé) vient de `leaflet-bar`. -->
 <style>
-.reset-control {
-  width: 30px;
-  height: 30px;
+.nav-control a {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: white;
-  border: 2px solid rgba(0, 0, 0, 0.2);
-  background-clip: padding-box;
-  border-radius: 4px;
   color: #444;
-  cursor: pointer;
-  padding: 0;
-}
-
-.reset-control:hover:not(:disabled) {
-  background: #f4f4f4;
-}
-
-.reset-control:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 </style>
