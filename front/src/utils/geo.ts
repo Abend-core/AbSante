@@ -15,3 +15,7 @@ export function distanceKm([lat1, lon1]: LatLon, [lat2, lon2]: LatLon): number {
 export function itineraireUrl([lat, lon]: LatLon): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`
 }
+
+/** Au-delà de ce rayon d'incertitude (m), la position du navigateur vient de la connexion internet
+ *  (IP, Wi-Fi) et non d'un GPS : elle peut être à des dizaines de km de la personne. */
+export const POSITION_IMPRECISE_M = 2000

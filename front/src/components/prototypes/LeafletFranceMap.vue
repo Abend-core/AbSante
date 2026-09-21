@@ -6,7 +6,7 @@ import { useFranceGeo } from '../../composables/useFranceGeo'
 import { useFranceRppsStats, type CommuneOption } from '../../composables/useFranceRppsStats'
 import { useEtablissements, type Praticien, type Etablissement } from '../../composables/useEtablissements'
 import { findNearby, type NearbyResult } from '../../composables/useNearby'
-import type { LatLon } from '../../utils/geo'
+import { POSITION_IMPRECISE_M, type LatLon } from '../../utils/geo'
 import { createColorScale } from '../../composables/useColorScale'
 import ColorLegend from '../molecules/ColorLegend.vue'
 import ProfessionSelect from '../molecules/ProfessionSelect.vue'
@@ -49,9 +49,13 @@ const nearbyStatus = ref<NearbyStatus>('idle')
 const nearbyResults = ref<NearbyResult[]>([])
 /** Ville choisie à la place de la position de l'appareil (repli quand la localisation échoue). */
 const nearbyWhere = ref<string | null>(null)
+/** Rayon d'incertitude (m) de la position donnée par le navigateur : grand sans GPS (localisation par IP). */
+const nearbyAccuracyM = ref<number | null>(null)
 /** Échecs de localisation après lesquels choisir une ville lance la recherche autour d'elle. */
 const LOCATION_FAILURES: NearbyStatus[] = ['denied', 'unsupported', 'unavailable', 'timeout']
 // Codes de GeolocationPositionError.
+/** Sous ce rayon, le cercle d'incertitude serait masqué par le repère « vous êtes ici ». */
+const ACCURACY_CIRCLE_MIN_M = 200
 const PERMISSION_DENIED = 1
 const TIMEOUT = 3
 
@@ -482,6 +486,7 @@ function resetZoom() {
 function locateMe() {
   nearbyRun++ // ignore une recherche encore en cours
   nearbyWhere.value = null
+  nearbyAccuracyM.value = null
   nearbyResults.value = []
   nearbyLayer?.clearLayers()
   // La géolocalisation exige une connexion sécurisée (https) : sans, les navigateurs la refusent.
@@ -491,7 +496,7 @@ function locateMe() {
   }
   nearbyStatus.value = 'locating'
   navigator.geolocation.getCurrentPosition(
-    (pos) => void searchNearby([pos.coords.latitude, pos.coords.longitude]),
+    (pos) => void searchNearby([pos.coords.latitude, pos.coords.longitude], null, pos.coords.accuracy),
     (err) => {
       // Refus, appareil qui n'arrive pas à se localiser (fréquent sur ordinateur), ou délai dépassé :
       // trois causes différentes, à ne pas confondre avec un échec de la recherche qui suit.
@@ -501,10 +506,11 @@ function locateMe() {
   )
 }
 
-async function searchNearby(origin: LatLon, where: string | null = null) {
+async function searchNearby(origin: LatLon, where: string | null = null, accuracyM: number | null = null) {
   const run = ++nearbyRun
   nearbyOrigin = origin
   nearbyWhere.value = where
+  nearbyAccuracyM.value = accuracyM
   nearbyStatus.value = 'searching'
   try {
     const results = await findNearby(origin, {
@@ -526,14 +532,27 @@ function drawNearby(origin: LatLon, results: NearbyResult[]) {
   nearbyLayer.clearLayers()
   const me = L.circleMarker(origin, { radius: 8, color: '#fff', weight: 3, fillColor: '#1e88e5', fillOpacity: 1, pane: ETABLISSEMENTS_PANE })
   me.bindTooltip(nearbyWhere.value ? `Centre de ${nearbyWhere.value}` : 'Vous êtes ici')
+  // Position imprécise (sans GPS) : on montre la zone où la personne peut réellement se trouver.
+  const accuracy = nearbyAccuracyM.value
+  if (accuracy !== null && accuracy >= ACCURACY_CIRCLE_MIN_M) {
+    nearbyLayer.addLayer(L.circle(origin, { radius: accuracy, color: '#1e88e5', weight: 1, fillOpacity: 0.08, interactive: false }))
+  }
   nearbyLayer.addLayer(me)
   for (const r of results) {
     const marker = makeMarker(r.position[0], r.position[1])
     marker.on('click', () => onSelectNearby(r))
     nearbyLayer.addLayer(marker)
   }
-  // Cadre la personne et ses résultats ; sans résultat, se contente de la centrer.
-  if (results.length > 0) map.fitBounds([origin, ...results.map((r) => r.position)], { padding: [30, 30], maxZoom: 15 })
+  // Cadre la personne et ses résultats ; sans résultat, se contente de la centrer. Une position
+  // imprécise est cadrée avec sa zone d'incertitude, sinon la carte, zoomée sur les résultats,
+  // ferait croire que la position est exacte.
+  const points: LatLon[] = [origin, ...results.map((r) => r.position)]
+  if (accuracy !== null && accuracy >= ACCURACY_CIRCLE_MIN_M) {
+    const dLat = accuracy / 111_320 // mètres par degré de latitude
+    const dLon = dLat / Math.cos((origin[0] * Math.PI) / 180)
+    points.push([origin[0] + dLat, origin[1] + dLon], [origin[0] - dLat, origin[1] - dLon])
+  }
+  if (points.length > 1) map.fitBounds(points, { padding: [30, 30], maxZoom: 15 })
   else map.setView(origin, 12)
 }
 
@@ -545,6 +564,7 @@ function closeNearby() {
   nearbyRun++ // ignore une recherche encore en cours
   nearbyOrigin = null
   nearbyWhere.value = null
+  nearbyAccuracyM.value = null
   nearbyStatus.value = 'idle'
   nearbyResults.value = []
   nearbyLayer?.clearLayers()
@@ -565,9 +585,12 @@ function selectCity(c: CommuneOption) {
   selectedPoint.value = { nom: c.nom, n: match?.n ?? 0 }
   stats.zoomedDept.value = c.dept
   focusCity(c.lat, c.lon, cityZoomFor(c.total))
-  // Localisation impossible (ou déjà en mode « autour d'une ville ») : la ville choisie sert de
-  // point de départ à « Autour de moi ».
-  if (nearbyWhere.value !== null || LOCATION_FAILURES.includes(nearbyStatus.value)) void searchNearby([c.lat, c.lon], c.nom)
+  // Localisation impossible ou trop imprécise (ou déjà en mode « autour d'une ville ») : la ville
+  // choisie sert de point de départ à « Autour de moi ».
+  const imprecise = (nearbyAccuracyM.value ?? 0) >= POSITION_IMPRECISE_M
+  if (nearbyWhere.value !== null || imprecise || LOCATION_FAILURES.includes(nearbyStatus.value)) {
+    void searchNearby([c.lat, c.lon], c.nom)
+  }
 }
 
 /** Unité des effectifs affichés : « praticiens », « infirmier », « praticiens en cardiologie »... */
@@ -610,7 +633,7 @@ watch(
 )
 // « Autour de moi » suit la sélection : changer de profession relance la recherche depuis la même position.
 watch([() => stats.selectedProfession.value, () => stats.selectedSpecialiteIdx.value], () => {
-  if (nearbyOrigin && nearbyStatus.value !== 'idle') void searchNearby(nearbyOrigin, nearbyWhere.value)
+  if (nearbyOrigin && nearbyStatus.value !== 'idle') void searchNearby(nearbyOrigin, nearbyWhere.value, nearbyAccuracyM.value)
 })
 watch(showEtablissements, (visible) => {
   if (!map || !pointsLayer) return
@@ -678,6 +701,7 @@ onBeforeUnmount(() => {
       :results="nearbyResults"
       :label="stats.selectionLabel.value"
       :where="nearbyWhere"
+      :accuracy-m="nearbyAccuracyM"
       @select="onSelectNearby"
       @close="closeNearby"
     />

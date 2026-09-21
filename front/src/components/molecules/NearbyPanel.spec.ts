@@ -40,6 +40,19 @@ describe('NearbyPanel', () => {
     expect(mount(NearbyPanel, { props: { status: 'done', results: [], label: null } }).text()).toContain('Autour de vous')
   })
 
+  it("prévient quand la position est approximative (localisation par IP, sans GPS), avec l'ordre de grandeur", () => {
+    const wrapper = mount(NearbyPanel, { props: { status: 'done', results: [resultat('A', 30)], label: null, accuracyM: 45_000 } })
+    const alerte = wrapper.find('.nearby__warning')
+    expect(alerte.text()).toContain('Position approximative (à 45 km près)')
+    expect(alerte.text()).toContain('pas par GPS')
+    expect(alerte.text()).toContain('choisissez une ville')
+  })
+
+  it.each([[undefined], [null], [25], [1999]])('ne prévient pas quand la position est précise (%s m)', (accuracyM) => {
+    const wrapper = mount(NearbyPanel, { props: { status: 'done', results: [resultat('A', 1)], label: null, accuracyM } })
+    expect(wrapper.find('.nearby__warning').exists()).toBe(false)
+  })
+
   it('liste les établissements avec distance, commune, praticiens et lien d\'itinéraire', () => {
     const wrapper = mount(NearbyPanel, { props: { status: 'done', results: [resultat('CABINET DU PARC', 0.84), resultat('CLINIQUE', 12.4)], label: 'Cardiologie' } })
     const items = wrapper.findAll('.nearby__list li')
