@@ -8,10 +8,12 @@
 # GARDE-FOUS DE CHARGE : le watchdog du Pi (/usr/local/bin/watchdog-check.sh) le redémarre quand
 # la charge (1 min) dépasse 10. La restauration écrit beaucoup sur la carte SD, donc :
 #   - on ne démarre pas si le Pi est déjà chargé (on retentera la nuit suivante) ;
-#   - la base est mise en pause dès que la charge atteint HIGH et reprise sous LOW (décision prise sur
-#     l'ÉTAT RÉEL du conteneur, jamais sur une variable : ne pas mettre la base en pause à la main
-#     pendant l'exécution, cela désynchronise Docker et le gel du cgroup) ;
-#   - la pause est TOUJOURS levée à la fin, même en cas d'erreur.
+#   - la base est bridée en CPU pendant la restauration (docker update --cpus), jamais mise en pause :
+#     une pause gèle aussi le site, et la boucle pause/reprise a bloqué une restauration 12 jours
+#     (29/09 → 10/10), la base gelée par intermittence et les healthchecks en échec ;
+#   - la restauration est abandonnée proprement si la charge atteint ABORT_LOAD (sous le seuil du
+#     watchdog) ou si elle dépasse MAX_MINUTES : données actuelles intactes, nouvel essai la nuit suivante ;
+#   - le bridage est TOUJOURS levé à la fin, même en cas d'erreur.
 set -uo pipefail
 
 BASE_URL="${ABSANTE_DB_URL:-https://github.com/Abend-core/AbSante/releases/download/data-latest}"
@@ -20,8 +22,9 @@ CONTAINER=absante-postgres
 STATE="$DIR/.db-sha256"
 WORK="$DIR/tmp-update"
 MAX_START_LOAD="${ABSANTE_MAX_START_LOAD:-3}"
-HIGH="${ABSANTE_LOAD_HIGH:-4}"
-LOW="${ABSANTE_LOAD_LOW:-2}"
+ABORT_LOAD="${ABSANTE_ABORT_LOAD:-8}"
+MAX_MINUTES="${ABSANTE_MAX_MINUTES:-120}"
+CPUS="${ABSANTE_RESTORE_CPUS:-1}"
 MIN_PRATICIENS="${ABSANTE_MIN_PRATICIENS:-1000000}"
 
 log() { echo "$(date '+%F %T') $*"; }
@@ -33,10 +36,13 @@ psql_() { docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$CONTAIN
 exec 9>/tmp/absante-update-db.lock
 flock -n 9 || { log "déjà en cours, abandon"; exit 0; }
 
-throttle_pid=""
+watch_pid=""
+stop_restore() { docker exec "$CONTAINER" pkill pg_restore >/dev/null 2>&1; }
 cleanup() {
-  [ -n "$throttle_pid" ] && kill "$throttle_pid" 2>/dev/null
-  docker unpause "$CONTAINER" >/dev/null 2>&1   # jamais laisser la base en pause
+  [ -n "$watch_pid" ] && kill "$watch_pid" 2>/dev/null
+  stop_restore
+  docker update --cpus 0 "$CONTAINER" >/dev/null 2>&1   # jamais laisser la base bridée
+  docker unpause "$CONTAINER" >/dev/null 2>&1           # au cas où une ancienne version l'aurait laissée en pause
   docker exec "$CONTAINER" rm -f /tmp/rpps.dump >/dev/null 2>&1
   rm -rf "$WORK"
 }
@@ -63,35 +69,41 @@ curl -fL --retry 3 --retry-delay 20 --max-time 900 -o "$WORK/rpps.dump" "$BASE_U
 docker cp "$WORK/rpps.dump" "$CONTAINER:/tmp/rpps.dump" || { log "ERREUR : copie dans le conteneur"; exit 1; }
 psql_ -c "DROP SCHEMA IF EXISTS rpps_next CASCADE" >/dev/null || exit 1
 
-log "restauration dans le schéma rpps_next (1 processus, sans parallélisme)"
+docker update --cpus "$CPUS" "$CONTAINER" >/dev/null 2>&1 \
+  || log "AVERTISSEMENT : bridage CPU impossible, restauration sans bridage"
+log "restauration dans le schéma rpps_next (1 processus, $CPUS CPU, abandon à charge $ABORT_LOAD ou après $MAX_MINUTES min)"
 nice -n 10 docker exec \
   -e PGOPTIONS="-c synchronous_commit=off -c max_parallel_maintenance_workers=0 -c max_parallel_workers_per_gather=0 -c maintenance_work_mem=64MB -c backend_flush_after=256kB" \
   "$CONTAINER" pg_restore -U absante -d absante --no-owner -j 1 /tmp/rpps.dump &
 restore_pid=$!
 
-# Garde-fou de charge : lancé APRÈS le démarrage de pg_restore (un `docker exec` sur une base déjà
-# en pause échoue). Il ne garde pas le descripteur du verrou (9>&-), sinon le verrou survivrait au script.
-sleep 5
+# Garde-fou : pic de charge noté, abandon au-delà d'ABORT_LOAD ou de MAX_MINUTES. Il ne garde pas
+# le descripteur du verrou (9>&-), sinon le verrou survivrait au script.
 echo 0 > "$WORK/peak"
 (
   peak=0
+  limite=$(( $(date +%s) + MAX_MINUTES * 60 ))
   while :; do
     cur="$(load)"
     [ "$cur" -gt "$peak" ] && { peak="$cur"; echo "$peak" > "$WORK/peak"; }
-    is_paused="$(docker inspect -f '{{.State.Paused}}' "$CONTAINER" 2>/dev/null)"
-    if [ "$is_paused" = "false" ] && [ "$cur" -ge "$HIGH" ]; then docker pause "$CONTAINER" >/dev/null 2>&1
-    elif [ "$is_paused" = "true" ] && [ "$cur" -le "$LOW" ]; then docker unpause "$CONTAINER" >/dev/null 2>&1; fi
-    sleep 1
+    if [ "$cur" -ge "$ABORT_LOAD" ]; then echo "charge $cur" > "$WORK/abort"; stop_restore; break; fi
+    if [ "$(date +%s)" -ge "$limite" ]; then echo "plus de $MAX_MINUTES min" > "$WORK/abort"; stop_restore; break; fi
+    sleep 2
   done
 ) 9>&- &
-throttle_pid=$!
+watch_pid=$!
 
 wait "$restore_pid"
 rc=$?
 
-kill "$throttle_pid" 2>/dev/null; wait "$throttle_pid" 2>/dev/null; throttle_pid=""
-docker unpause "$CONTAINER" >/dev/null 2>&1
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; watch_pid=""
+docker update --cpus 0 "$CONTAINER" >/dev/null 2>&1
 
+if [ -f "$WORK/abort" ]; then
+  log "ABANDON : $(cat "$WORK/abort"), données actuelles conservées, nouvel essai la nuit suivante"
+  psql_ -c "DROP SCHEMA IF EXISTS rpps_next CASCADE" >/dev/null
+  exit 1
+fi
 if [ "$rc" -ne 0 ]; then
   log "ERREUR : restauration échouée (code $rc), données actuelles conservées"
   psql_ -c "DROP SCHEMA IF EXISTS rpps_next CASCADE" >/dev/null

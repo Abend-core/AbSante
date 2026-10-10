@@ -117,8 +117,9 @@ résout déjà vers le Pi (DNS générique), aucun réglage DNS n'est nécessair
 | Restauration du dump | Pi, 4h (cron) | `scripts/pi_update_db.sh` : restaure à côté du schéma en service, vérifie, puis bascule par renommage, puis met à jour l'historique mensuel |
 
 `scripts/pi_update_db.sh` protège le Pi : il ne démarre pas si la charge dépasse 3, vérifie la somme
-de contrôle du dump, met la base en pause dès que la charge atteint 4 (reprise sous 2) et lève
-toujours la pause à la fin. Le site reste servi pendant l'opération et, en cas d'échec, les données
+de contrôle du dump, bride la base à 1 CPU pendant la restauration (jamais de pause, qui gèlerait le
+site) et abandonne proprement si la charge atteint 8 ou après 2 h ; le bridage est toujours levé à
+la fin. Le site reste servi pendant l'opération et, en cas d'échec, les données
 actuelles restent intactes (journal : `~/absante/update-db.log`).
 
 Installation du cron sur le Pi (une seule fois) :
